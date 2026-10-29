@@ -21,6 +21,7 @@ def _view() -> CaseView:
         roi_90d=None,
         odds_valid=True,
         missing_prices=0,
+        prices_updated_at=None,
         drops=(
             DropView(
                 name="★ Kukri Knife | Fade",

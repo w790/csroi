@@ -26,6 +26,7 @@ class DropRecord:
     rarity: str | None
     is_special: bool
     image_url: str | None
+    weight: int = 1
 
 
 @dataclass(frozen=True)

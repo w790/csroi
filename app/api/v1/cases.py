@@ -7,8 +7,17 @@ from app.api.deps import get_session
 from app.domain.constants import WEAPON_CASE_TYPE
 from app.repositories.catalog import CatalogRepository
 from app.repositories.prices import PriceRepository
-from app.schemas.case import ASSUMPTIONS, CaseDetail, CaseDropOut, CaseSummary
-from app.services.case_query import CaseQueryService, CaseView, DropView
+from app.schemas.case import (
+    ASSUMPTIONS,
+    CaseDetail,
+    CaseDropOut,
+    CaseHistory,
+    CaseSort,
+    CaseSummary,
+    PricePointOut,
+    SortOrder,
+)
+from app.services.case_query import CaseHistoryView, CaseQueryService, CaseView, DropView
 
 router = APIRouter(prefix="/cases", tags=["cases"])
 
@@ -20,9 +29,15 @@ def _service(session: AsyncSession) -> CaseQueryService:
 @router.get("", response_model=list[CaseSummary])
 async def list_cases(
     crate_type: str = Query(default=WEAPON_CASE_TYPE),
+    sort: CaseSort = Query(default=CaseSort.name),
+    order: SortOrder = Query(default=SortOrder.asc),
     session: AsyncSession = Depends(get_session),
 ) -> list[CaseSummary]:
-    views = await _service(session).list_cases(crate_type)
+    views = await _service(session).list_cases(
+        crate_type,
+        sort=sort.value,
+        descending=order is SortOrder.desc,
+    )
     return [to_summary(view) for view in views]
 
 
@@ -35,6 +50,18 @@ async def get_case(
     if view is None:
         raise HTTPException(status_code=404, detail="кейс не найден")
     return to_detail(view)
+
+
+@router.get("/{case_id}/history", response_model=CaseHistory)
+async def get_case_history(
+    case_id: int,
+    days: int = Query(default=90, ge=1, le=3650),
+    session: AsyncSession = Depends(get_session),
+) -> CaseHistory:
+    view = await _service(session).get_history(case_id, days)
+    if view is None:
+        raise HTTPException(status_code=404, detail="кейс не найден")
+    return to_history(view)
 
 
 def to_summary(view: CaseView) -> CaseSummary:
@@ -53,6 +80,7 @@ def to_summary(view: CaseView) -> CaseSummary:
         roi_90d=_ratio(view.roi_90d),
         odds_valid=view.odds_valid,
         missing_prices=view.missing_prices,
+        prices_updated_at=view.prices_updated_at,
         assumptions=ASSUMPTIONS,
     )
 
@@ -62,6 +90,19 @@ def to_detail(view: CaseView) -> CaseDetail:
     return CaseDetail(
         **summary.model_dump(),
         drops=[_drop(item) for item in view.drops],
+    )
+
+
+def to_history(view: CaseHistoryView) -> CaseHistory:
+    return CaseHistory(
+        id=view.id,
+        name=view.name,
+        market_hash_name=view.market_hash_name,
+        currency=view.currency,
+        points=[
+            PricePointOut(captured_on=point.captured_on, price=_money(point.price))
+            for point in view.points
+        ],
     )
 
 

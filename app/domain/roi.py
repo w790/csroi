@@ -10,6 +10,7 @@ class DropInput:
     rarity: str | None
     is_special: bool
     price: Decimal | None
+    weight: int = 1
 
 
 @dataclass(frozen=True)
@@ -60,13 +61,9 @@ def evaluate_unboxing(
 
     probabilities: dict[str, Decimal] = {}
     for rarity, group in groups.items():
-        chance = TIER_ODDS[rarity] / len(group)
-        for drop in group:
-            probabilities[drop.name] = chance
+        _share(probabilities, TIER_ODDS[rarity], group)
     if specials:
-        chance = SPECIAL_ODDS / len(specials)
-        for drop in specials:
-            probabilities[drop.name] = chance
+        _share(probabilities, SPECIAL_ODDS, specials)
 
     missing = sum(1 for drop in drops if drop.price is None)
     expected: Decimal | None = None
@@ -89,6 +86,12 @@ def evaluate_unboxing(
         odds_valid=True,
         probabilities=probabilities,
     )
+
+
+def _share(probabilities: dict[str, Decimal], odds: Decimal, group: list[DropInput]) -> None:
+    total = sum(drop.weight for drop in group)
+    for drop in group:
+        probabilities[drop.name] = odds * drop.weight / total
 
 
 def _cost(case_price: Decimal | None, key_price: Decimal) -> Decimal | None:

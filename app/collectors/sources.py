@@ -9,7 +9,7 @@ from app.domain.constants import (
     WINDOW_7D,
     WINDOW_90D,
 )
-from app.domain.names import unique_by_name
+from app.domain.names import merge_phases
 from app.domain.records import CrateRecord, DropRecord, Listing, SaleWindow, SkinRecord
 
 SKINPORT_WINDOWS = {
@@ -132,7 +132,7 @@ class BymykelClient:
                     image_url=_text(raw.get("image")),
                     def_index=_whole(raw.get("def_index")),
                     first_sale_date=_text(raw.get("first_sale_date")),
-                    drops=tuple(unique_by_name(drops)),
+                    drops=tuple(merge_phases(drops)),
                 )
             )
         return crates

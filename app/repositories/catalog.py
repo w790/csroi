@@ -1,6 +1,6 @@
 from collections.abc import Iterable, Sequence
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -98,6 +98,21 @@ class CatalogRepository:
         stmt = select(CaseDrop).where(CaseDrop.case_id.in_(case_ids))
         return list(await self._session.scalars(stmt))
 
+    async def float_ranges(
+        self,
+        names: list[str],
+    ) -> dict[str, tuple[float | None, float | None]]:
+        found: dict[str, tuple[float | None, float | None]] = {}
+        for batch in _chunks(names, 1000):
+            stmt = (
+                select(Item.base_name, func.min(Item.min_float), func.max(Item.max_float))
+                .where(Item.kind == KIND_SKIN, Item.base_name.in_(list(batch)))
+                .group_by(Item.base_name)
+            )
+            for name, low, high in (await self._session.execute(stmt)).all():
+                found[name] = (low, high)
+        return found
+
 
 def skin_item_rows(skins: list[SkinRecord]) -> list[dict]:
     rows: list[dict] = []
@@ -181,6 +196,7 @@ def drop_rows(crates: list[CrateRecord], case_ids: dict[str, int], wears_by_skin
                     "name": drop.name,
                     "rarity": drop.rarity,
                     "is_special": drop.is_special,
+                    "weight": drop.weight,
                     "image_url": drop.image_url,
                     "price_market_hash_name": preferred_market_hash_name(drop.name, wears),
                 }

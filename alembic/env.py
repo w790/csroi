@@ -2,7 +2,7 @@ import asyncio
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import pool
+from sqlalchemy import pool, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
@@ -17,6 +17,7 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
+MIGRATION_LOCK_KEY = 730_0001
 
 
 def run_migrations_offline() -> None:
@@ -38,6 +39,10 @@ def do_run_migrations(connection: Connection) -> None:
         compare_type=True,
     )
     with context.begin_transaction():
+        connection.execute(
+            text("SELECT pg_advisory_xact_lock(:key)"),
+            {"key": MIGRATION_LOCK_KEY},
+        )
         context.run_migrations()
 
 

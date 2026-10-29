@@ -1,11 +1,33 @@
+from datetime import date, datetime
+from enum import Enum
+
 from pydantic import BaseModel
+
+from app.core.config import settings
 
 ASSUMPTIONS = (
     "Шансы Valve для оружейного кейса. "
-    "Цена предмета — Field-Tested, если он есть в продаже, иначе ближайший доступный износ. "
-    "Ключ 2.49 USD. StatTrak и точный float не учитываются. "
+    "Каждая фаза Doppler — отдельная запись в пуле ножей, цена у фаз общая. "
+    "Цена предмета — Field-Tested, если он есть в продаже, иначе износ, "
+    "который занимает большую часть float-диапазона скина. "
+    f"Ключ {settings.key_price_usd} USD. StatTrak и точный float не учитываются. "
     "Investing ROI сравнивает медиану 24 часов с медианой окна 7/30/90 дней."
 )
+
+
+class CaseSort(str, Enum):
+    name = "name"
+    case_price = "case_price"
+    expected_value = "expected_value"
+    unboxing_roi = "unboxing_roi"
+    roi_7d = "roi_7d"
+    roi_30d = "roi_30d"
+    roi_90d = "roi_90d"
+
+
+class SortOrder(str, Enum):
+    asc = "asc"
+    desc = "desc"
 
 
 class CaseDropOut(BaseModel):
@@ -33,8 +55,22 @@ class CaseSummary(BaseModel):
     roi_90d: float | None
     odds_valid: bool
     missing_prices: int
+    prices_updated_at: datetime | None
     assumptions: str
 
 
 class CaseDetail(CaseSummary):
     drops: list[CaseDropOut]
+
+
+class PricePointOut(BaseModel):
+    captured_on: date
+    price: float
+
+
+class CaseHistory(BaseModel):
+    id: int
+    name: str
+    market_hash_name: str
+    currency: str
+    points: list[PricePointOut]

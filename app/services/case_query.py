@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 from app.core.config import settings
@@ -10,7 +11,7 @@ from app.domain.constants import (
     WINDOW_7D,
     WINDOW_90D,
 )
-from app.domain.names import price_candidates
+from app.domain.names import price_candidates, wear_order
 from app.domain.pricing import choose_listing_price, investing_roi, resolve_wear_price
 from app.domain.roi import DropInput, UnboxingEvaluation, evaluate_unboxing
 from app.models.case import Case, CaseDrop
@@ -45,7 +46,23 @@ class CaseView:
     roi_90d: Decimal | None
     odds_valid: bool
     missing_prices: int
+    prices_updated_at: datetime | None
     drops: tuple[DropView, ...]
+
+
+@dataclass(frozen=True)
+class PricePointView:
+    captured_on: date
+    price: Decimal
+
+
+@dataclass(frozen=True)
+class CaseHistoryView:
+    id: int
+    name: str
+    market_hash_name: str
+    currency: str
+    points: tuple[PricePointView, ...]
 
 
 _RARITY_ORDER = {
@@ -61,9 +78,15 @@ class CaseQueryService:
         self._catalog = catalog
         self._prices = prices
 
-    async def list_cases(self, crate_type: str = WEAPON_CASE_TYPE) -> list[CaseView]:
+    async def list_cases(
+        self,
+        crate_type: str = WEAPON_CASE_TYPE,
+        sort: str = "name",
+        descending: bool = False,
+    ) -> list[CaseView]:
         cases = await self._catalog.list_cases(crate_type)
-        return await self._compose(cases, include_drops=False)
+        views = await self._compose(cases, include_drops=False)
+        return sort_views(views, sort, descending=descending)
 
     async def get_case(self, case_id: int) -> CaseView | None:
         case = await self._catalog.get_case(case_id)
@@ -71,6 +94,29 @@ class CaseQueryService:
             return None
         details = await self._compose([case], include_drops=True)
         return details[0]
+
+    async def get_history(self, case_id: int, days: int) -> CaseHistoryView | None:
+        case = await self._catalog.get_case(case_id)
+        if case is None:
+            return None
+        currency = settings.skinport_currency
+        since = datetime.now(timezone.utc).date() - timedelta(days=days - 1)
+        snapshots = await self._prices.snapshots_for(
+            case.market_hash_name,
+            SOURCE_SKINPORT,
+            currency,
+            since,
+        )
+        return CaseHistoryView(
+            id=case.id,
+            name=case.name,
+            market_hash_name=case.market_hash_name,
+            currency=currency,
+            points=tuple(
+                PricePointView(captured_on=row.captured_on, price=row.price)
+                for row in snapshots
+            ),
+        )
 
     async def _compose(self, cases: list[Case], *, include_drops: bool) -> list[CaseView]:
         if not cases:
@@ -92,12 +138,14 @@ class CaseQueryService:
             SOURCE_SKINPORT,
             currency,
         )
+        floats = await self._catalog.float_ranges(sorted({drop.name for drop in drops}))
         return [
             _to_detail(
                 case,
                 drops_by_case.get(case.id, []),
                 listings,
                 windows,
+                floats,
                 include_drops=include_drops,
             )
             for case in cases
@@ -109,6 +157,7 @@ def _to_detail(
     drops: list[CaseDrop],
     listings: dict[str, Price],
     windows: dict[tuple[str, str], PriceWindow],
+    floats: dict[str, tuple[float | None, float | None]],
     *,
     include_drops: bool,
 ) -> CaseView:
@@ -118,13 +167,21 @@ def _to_detail(
         for name, row in listings.items()
     }
     case_price = amounts.get(case.market_hash_name)
-    resolved = [resolve_wear_price(drop.name, amounts) for drop in ordered]
+    resolved = [
+        resolve_wear_price(
+            drop.name,
+            amounts,
+            wear_order(*floats.get(drop.name, (None, None))),
+        )
+        for drop in ordered
+    ]
     inputs = [
         DropInput(
             name=drop.name,
             rarity=drop.rarity,
             is_special=drop.is_special,
             price=amount,
+            weight=drop.weight,
         )
         for drop, (amount, _) in zip(ordered, resolved, strict=True)
     ]
@@ -141,6 +198,7 @@ def _to_detail(
         )
 
     current = _current_price(case.market_hash_name, windows, case_price)
+    case_listing = listings.get(case.market_hash_name)
     drop_views: tuple[DropView, ...] = ()
     if include_drops:
         drop_views = tuple(
@@ -171,8 +229,16 @@ def _to_detail(
         roi_90d=_window_roi(case.market_hash_name, WINDOW_90D, windows, current),
         odds_valid=evaluation.odds_valid,
         missing_prices=evaluation.missing_prices,
+        prices_updated_at=case_listing.updated_at if case_listing is not None else None,
         drops=drop_views,
     )
+
+
+def sort_views(views: list[CaseView], field: str, *, descending: bool) -> list[CaseView]:
+    present = [view for view in views if getattr(view, field) is not None]
+    missing = [view for view in views if getattr(view, field) is None]
+    present.sort(key=lambda view: getattr(view, field), reverse=descending)
+    return present + missing
 
 
 def _current_price(

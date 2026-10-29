@@ -1,0 +1,194 @@
+import asyncio
+from datetime import date, datetime, timezone
+from decimal import Decimal
+
+from fastapi.testclient import TestClient
+
+from app.api.deps import get_session
+from app.domain.odds import SPECIAL_ODDS
+from app.main import app
+from app.models.case import Case, CaseDrop
+from app.models.price import Price, PriceSnapshot
+from app.services.case_query import CaseQueryService
+
+UPDATED_AT = datetime(2026, 10, 1, 12, 0, tzinfo=timezone.utc)
+
+TIERS = (
+    ("blue", "Mil-Spec Grade"),
+    ("purple", "Restricted"),
+    ("pink", "Classified"),
+    ("red", "Covert"),
+)
+
+
+def _weapon_case(case_id: int, name: str) -> tuple[Case, list[CaseDrop]]:
+    case = Case(
+        id=case_id,
+        bymykel_id=f"crate-{case_id}",
+        name=name,
+        market_hash_name=name,
+        crate_type="Case",
+        image_url=None,
+    )
+    drops = [
+        CaseDrop(
+            case_id=case_id,
+            name=f"{name} {color}",
+            rarity=rarity,
+            is_special=False,
+            weight=1,
+            image_url=None,
+            price_market_hash_name=f"{name} {color}",
+        )
+        for color, rarity in TIERS
+    ]
+    drops += [
+        CaseDrop(
+            case_id=case_id,
+            name=f"★ {name} | Doppler",
+            rarity="Covert",
+            is_special=True,
+            weight=7,
+            image_url=None,
+            price_market_hash_name=f"★ {name} | Doppler",
+        ),
+        CaseDrop(
+            case_id=case_id,
+            name=f"★ {name} | Rust Coat",
+            rarity="Covert",
+            is_special=True,
+            weight=1,
+            image_url=None,
+            price_market_hash_name=f"★ {name} | Rust Coat",
+        ),
+    ]
+    return case, drops
+
+
+def _price(name: str, amount: str) -> Price:
+    return Price(
+        market_hash_name=name,
+        suggested_price=Decimal(amount),
+        median_price=None,
+        min_price=None,
+        updated_at=UPDATED_AT,
+    )
+
+
+class _Catalog:
+    def __init__(self, cases: list[Case], drops: list[CaseDrop]) -> None:
+        self._cases = cases
+        self._drops = drops
+
+    async def list_cases(self, crate_type):
+        return [case for case in self._cases if case.crate_type == crate_type]
+
+    async def get_case(self, case_id):
+        return next((case for case in self._cases if case.id == case_id), None)
+
+    async def drops_for(self, case_ids):
+        return [drop for drop in self._drops if drop.case_id in case_ids]
+
+    async def float_ranges(self, names):
+        return {name: (0.0, 0.08) for name in names if name.endswith("| Doppler")}
+
+
+class _Prices:
+    def __init__(self, listings: list[Price], snapshots: list[PriceSnapshot] = ()) -> None:
+        self._listings = {row.market_hash_name: row for row in listings}
+        self._snapshots = list(snapshots)
+        self.since: date | None = None
+
+    async def listings_for(self, names, _source, _currency):
+        return {name: row for name, row in self._listings.items() if name in names}
+
+    async def windows_for(self, _names, _source, _currency):
+        return {}
+
+    async def snapshots_for(self, _name, _source, _currency, since):
+        self.since = since
+        return self._snapshots
+
+
+def _service() -> CaseQueryService:
+    cheap, cheap_drops = _weapon_case(1, "Cheap")
+    rich, rich_drops = _weapon_case(2, "Rich")
+    unpriced, unpriced_drops = _weapon_case(3, "Unpriced")
+    listings = [_price("Cheap", "0.50"), _price("Rich", "1.00")]
+    for drops, special in ((cheap_drops, "10"), (rich_drops, "1000")):
+        for drop in drops:
+            if drop.name != "★ Rich | Doppler":
+                listings.append(_price(drop.name, special if drop.is_special else "0.10"))
+    listings += [
+        _price("★ Rich | Doppler (Minimal Wear)", "5000"),
+        _price("★ Rich | Doppler (Factory New)", "1000"),
+    ]
+    snapshots = [
+        PriceSnapshot(market_hash_name="Rich", price=Decimal("0.90"), captured_on=date(2026, 9, 30)),
+        PriceSnapshot(market_hash_name="Rich", price=Decimal("1.00"), captured_on=date(2026, 10, 1)),
+    ]
+    return CaseQueryService(
+        _Catalog([cheap, rich, unpriced], cheap_drops + rich_drops + unpriced_drops),
+        _Prices(listings, snapshots),
+    )
+
+
+def test_list_sorts_by_roi_and_keeps_unpriced_last() -> None:
+    service = _service()
+
+    descending = asyncio.run(service.list_cases(sort="unboxing_roi", descending=True))
+    ascending = asyncio.run(service.list_cases(sort="unboxing_roi", descending=False))
+
+    assert [view.name for view in descending] == ["Rich", "Cheap", "Unpriced"]
+    assert [view.name for view in ascending] == ["Cheap", "Rich", "Unpriced"]
+    assert descending[-1].unboxing_roi is None
+    assert descending[0].prices_updated_at == UPDATED_AT
+    assert descending[-1].prices_updated_at is None
+
+
+def test_detail_gives_doppler_its_phase_share() -> None:
+    view = asyncio.run(_service().get_case(2))
+
+    drops = {drop.name: drop for drop in view.drops}
+    assert drops["★ Rich | Doppler"].probability == SPECIAL_ODDS * 7 / 8
+    assert drops["★ Rich | Rust Coat"].probability == SPECIAL_ODDS / 8
+    assert drops["★ Rich | Doppler"].market_hash_name == "★ Rich | Doppler (Factory New)"
+    assert view.expected_value == Decimal("0.10") * (1 - SPECIAL_ODDS) + Decimal("1000") * SPECIAL_ODDS
+
+
+def test_history_returns_snapshots_for_the_window() -> None:
+    service = _service()
+
+    history = asyncio.run(service.get_history(2, days=30))
+
+    assert history.market_hash_name == "Rich"
+    assert [point.price for point in history.points] == [Decimal("0.90"), Decimal("1.00")]
+    assert (datetime.now(timezone.utc).date() - service._prices.since).days == 29
+    assert asyncio.run(service.get_history(404, days=30)) is None
+
+
+async def _no_session():
+    yield None
+
+
+def test_cases_endpoint_validates_sort_and_history_window(monkeypatch) -> None:
+    monkeypatch.setattr("app.api.v1.cases._service", lambda _session: _service())
+    app.dependency_overrides[get_session] = _no_session
+    try:
+        client = TestClient(app)
+
+        listed = client.get("/api/v1/cases", params={"sort": "unboxing_roi", "order": "desc"})
+        assert listed.status_code == 200
+        assert [row["name"] for row in listed.json()] == ["Rich", "Cheap", "Unpriced"]
+        assert client.get("/api/v1/cases", params={"sort": "bogus"}).status_code == 422
+
+        history = client.get("/api/v1/cases/2/history", params={"days": 7})
+        assert history.status_code == 200
+        assert history.json()["points"] == [
+            {"captured_on": "2026-09-30", "price": 0.9},
+            {"captured_on": "2026-10-01", "price": 1.0},
+        ]
+        assert client.get("/api/v1/cases/2/history", params={"days": 0}).status_code == 422
+        assert client.get("/api/v1/cases/404/history").status_code == 404
+    finally:
+        app.dependency_overrides.clear()

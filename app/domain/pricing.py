@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+from app.domain.constants import WEAR_PREFERENCE
 from app.domain.names import price_candidates
 
 
@@ -17,8 +18,9 @@ def choose_listing_price(
 def resolve_wear_price(
     base_name: str,
     amounts: dict[str, Decimal | None],
+    wears: tuple[str, ...] = WEAR_PREFERENCE,
 ) -> tuple[Decimal | None, str]:
-    candidates = price_candidates(base_name)
+    candidates = price_candidates(base_name, wears)
     for name in candidates:
         amount = amounts.get(name)
         if amount is not None:

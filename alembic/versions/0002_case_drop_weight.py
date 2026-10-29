@@ -1,0 +1,20 @@
+from typing import Sequence, Union
+
+import sqlalchemy as sa
+from alembic import op
+
+revision: str = "0002_case_drop_weight"
+down_revision: Union[str, Sequence[str], None] = "0001_initial"
+branch_labels: Union[str, Sequence[str], None] = None
+depends_on: Union[str, Sequence[str], None] = None
+
+
+def upgrade() -> None:
+    op.add_column(
+        "case_drops",
+        sa.Column("weight", sa.Integer(), server_default="1", nullable=False),
+    )
+
+
+def downgrade() -> None:
+    op.drop_column("case_drops", "weight")

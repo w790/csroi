@@ -1,6 +1,7 @@
 from decimal import Decimal
 
-from app.domain.names import preferred_market_hash_name, unique_by_name
+from app.domain.constants import WEAR_PREFERENCE
+from app.domain.names import merge_phases, preferred_market_hash_name, wear_order
 from app.domain.odds import SPECIAL_ODDS, TIER_ODDS
 from app.domain.pricing import choose_listing_price, investing_roi, resolve_wear_price
 from app.domain.records import DropRecord
@@ -38,10 +39,12 @@ def test_duplicate_knife_phases_collapse_to_one_name() -> None:
         DropRecord("b", "★ Bowie Knife | Gamma Doppler", "Covert", True, None),
         DropRecord("c", "★ Bowie Knife | Lore", "Covert", True, None),
     ]
-    assert [row.name for row in unique_by_name(rows)] == [
-        "★ Bowie Knife | Gamma Doppler",
-        "★ Bowie Knife | Lore",
+    merged = merge_phases(rows)
+    assert [(row.name, row.weight) for row in merged] == [
+        ("★ Bowie Knife | Gamma Doppler", 2),
+        ("★ Bowie Knife | Lore", 1),
     ]
+    assert merged[0].bymykel_id == "a"
 
 
 def test_missing_field_tested_uses_next_listed_wear() -> None:
@@ -152,3 +155,42 @@ def test_two_skins_in_one_tier_share_its_odds() -> None:
         + Decimal("0.0064")
         + Decimal("0.0026")
     )
+
+
+def test_doppler_phases_weigh_the_special_pool() -> None:
+    drops = [
+        DropInput("blue", "Mil-Spec Grade", False, Decimal("1")),
+        DropInput("purple", "Restricted", False, Decimal("1")),
+        DropInput("pink", "Classified", False, Decimal("1")),
+        DropInput("red", "Covert", False, Decimal("1")),
+        DropInput("★ Karambit | Doppler", "Covert", True, Decimal("700"), weight=7),
+        DropInput("★ Karambit | Rust Coat", "Covert", True, Decimal("300")),
+    ]
+    evaluation = evaluate_unboxing(drops, Decimal("1"), Decimal("2.49"))
+    assert evaluation.probabilities["★ Karambit | Doppler"] == SPECIAL_ODDS * 7 / 8
+    assert evaluation.probabilities["★ Karambit | Rust Coat"] == SPECIAL_ODDS / 8
+    assert sum(evaluation.probabilities.values(), Decimal(0)) == Decimal("1.0000")
+
+
+def test_wear_order_keeps_field_tested_first_for_full_range_skins() -> None:
+    assert wear_order(0.0, 1.0)[0] == "Field-Tested"
+    assert wear_order(None, None) == WEAR_PREFERENCE
+
+
+def test_doppler_without_field_tested_is_priced_as_factory_new() -> None:
+    wears = wear_order(0.0, 0.08)
+    assert wears[:3] == ("Field-Tested", "Factory New", "Minimal Wear")
+    amount, name = resolve_wear_price(
+        "★ Talon Knife | Doppler",
+        {
+            "★ Talon Knife | Doppler (Minimal Wear)": Decimal("3389.33"),
+            "★ Talon Knife | Doppler (Factory New)": Decimal("2745.84"),
+        },
+        wears,
+    )
+    assert name == "★ Talon Knife | Doppler (Factory New)"
+    assert amount == Decimal("2745.84")
+
+
+def test_high_float_skin_falls_back_to_battle_scarred() -> None:
+    assert wear_order(0.4, 1.0)[1] == "Battle-Scarred"

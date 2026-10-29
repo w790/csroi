@@ -1,5 +1,5 @@
 from collections.abc import Iterable, Sequence
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.constants import SOURCE_SKINPORT
 from app.domain.records import Listing, SaleWindow
-from app.models.price import Price, PriceWindow
+from app.models.price import Price, PriceSnapshot, PriceWindow
 
 
 def _chunks(rows: Sequence, size: int) -> Iterable[Sequence]:
@@ -104,12 +104,12 @@ class PriceRepository:
                     market_hash_name,
                     source,
                     currency,
-                    COALESCE(median_price, suggested_price),
+                    COALESCE(suggested_price, median_price, min_price),
                     CURRENT_DATE
                 FROM prices
                 WHERE source = :source
                   AND currency = :currency
-                  AND COALESCE(median_price, suggested_price) IS NOT NULL
+                  AND COALESCE(suggested_price, median_price, min_price) IS NOT NULL
                 ON CONFLICT ON CONSTRAINT uq_price_snapshots_identity DO NOTHING
                 """
             ),
@@ -154,3 +154,22 @@ class PriceRepository:
             for row in await self._session.scalars(stmt):
                 found[(row.market_hash_name, row.window)] = row
         return found
+
+    async def snapshots_for(
+        self,
+        name: str,
+        source: str,
+        currency: str,
+        since: date,
+    ) -> list[PriceSnapshot]:
+        stmt = (
+            select(PriceSnapshot)
+            .where(
+                PriceSnapshot.market_hash_name == name,
+                PriceSnapshot.source == source,
+                PriceSnapshot.currency == currency,
+                PriceSnapshot.captured_on >= since,
+            )
+            .order_by(PriceSnapshot.captured_on)
+        )
+        return list(await self._session.scalars(stmt))

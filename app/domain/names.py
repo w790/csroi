@@ -1,8 +1,7 @@
-from typing import TypeVar
+from dataclasses import replace
 
-from app.domain.constants import WEAR_PREFERENCE
-
-T = TypeVar("T")
+from app.domain.constants import WEAR_FLOAT_RANGES, WEAR_PREFERENCE
+from app.domain.records import DropRecord
 
 
 def market_hash_name(base_name: str, wear: str | None) -> str:
@@ -25,8 +24,19 @@ def preferred_market_hash_name(base_name: str, wears: tuple[str, ...] | list[str
     return market_hash_name(base_name, preferred_wear(wears))
 
 
-def price_candidates(base_name: str) -> list[str]:
-    ordered = [market_hash_name(base_name, wear) for wear in WEAR_PREFERENCE]
+def wear_order(min_float: float | None, max_float: float | None) -> tuple[str, ...]:
+    if min_float is None or max_float is None or max_float <= min_float:
+        return WEAR_PREFERENCE
+    shares = {
+        wear: max(0.0, min(high, max_float) - max(low, min_float))
+        for wear, (low, high) in WEAR_FLOAT_RANGES.items()
+    }
+    first, *rest = WEAR_PREFERENCE
+    return (first, *sorted(rest, key=lambda wear: -shares[wear]))
+
+
+def price_candidates(base_name: str, wears: tuple[str, ...] = WEAR_PREFERENCE) -> list[str]:
+    ordered = [market_hash_name(base_name, wear) for wear in wears]
     ordered.append(base_name)
     unique: list[str] = []
     seen: set[str] = set()
@@ -37,13 +47,10 @@ def price_candidates(base_name: str) -> list[str]:
     return unique
 
 
-def unique_by_name(rows: list[T] | tuple[T, ...]) -> list[T]:
-    seen: set[str] = set()
-    result: list[T] = []
+def merge_phases(rows: list[DropRecord] | tuple[DropRecord, ...]) -> list[DropRecord]:
+    first: dict[str, DropRecord] = {}
+    weights: dict[str, int] = {}
     for row in rows:
-        name = getattr(row, "name", None)
-        if not name or name in seen:
-            continue
-        seen.add(name)
-        result.append(row)
-    return result
+        first.setdefault(row.name, row)
+        weights[row.name] = weights.get(row.name, 0) + row.weight
+    return [replace(row, weight=weights[name]) for name, row in first.items()]
