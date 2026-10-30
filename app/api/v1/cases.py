@@ -100,7 +100,7 @@ def to_history(view: CaseHistoryView) -> CaseHistory:
         market_hash_name=view.market_hash_name,
         currency=view.currency,
         points=[
-            PricePointOut(captured_on=point.captured_on, price=_money(point.price))
+            PricePointOut(captured_on=point.captured_on, price=_amount(point.price))
             for point in view.points
         ],
     )
@@ -121,6 +121,10 @@ def _drop(item: DropView) -> CaseDropOut:
 def _money(value: Decimal | None) -> float | None:
     if value is None:
         return None
+    return _amount(value)
+
+
+def _amount(value: Decimal) -> float:
     return float(value.quantize(Decimal("0.01")))
 
 

@@ -1,4 +1,5 @@
 from collections.abc import Iterable, Sequence
+from typing import Any
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -11,7 +12,7 @@ from app.models.case import Case, CaseDrop
 from app.models.item import Item
 
 
-def _chunks(rows: Sequence, size: int) -> Iterable[Sequence]:
+def _chunks[T](rows: Sequence[T], size: int) -> Iterable[Sequence[T]]:
     for index in range(0, len(rows), size):
         yield rows[index : index + size]
 
@@ -20,7 +21,7 @@ class CatalogRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def upsert_items(self, rows: list[dict]) -> int:
+    async def upsert_items(self, rows: list[dict[str, Any]]) -> int:
         if not rows:
             return 0
         saved = 0
@@ -51,7 +52,7 @@ class CatalogRepository:
             saved += len(batch)
         return saved
 
-    async def upsert_cases(self, rows: list[dict]) -> int:
+    async def upsert_cases(self, rows: list[dict[str, Any]]) -> int:
         if not rows:
             return 0
         for batch in _chunks(rows, 200):
@@ -75,7 +76,7 @@ class CatalogRepository:
         result = await self._session.execute(select(Case.bymykel_id, Case.id))
         return {bymykel_id: case_id for bymykel_id, case_id in result.all()}
 
-    async def replace_drops(self, rows: list[dict]) -> int:
+    async def replace_drops(self, rows: list[dict[str, Any]]) -> int:
         await self._session.execute(delete(CaseDrop))
         if not rows:
             return 0
@@ -114,8 +115,8 @@ class CatalogRepository:
         return found
 
 
-def skin_item_rows(skins: list[SkinRecord]) -> list[dict]:
-    rows: list[dict] = []
+def skin_item_rows(skins: list[SkinRecord]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
     for skin in skins:
         wears = skin.wears or ("",)
         for wear in wears:
@@ -142,7 +143,7 @@ def skin_item_rows(skins: list[SkinRecord]) -> list[dict]:
     return rows
 
 
-def crate_item_rows(crates: list[CrateRecord]) -> list[dict]:
+def crate_item_rows(crates: list[CrateRecord]) -> list[dict[str, Any]]:
     return [
         {
             "market_hash_name": crate.market_hash_name,
@@ -166,7 +167,7 @@ def crate_item_rows(crates: list[CrateRecord]) -> list[dict]:
     ]
 
 
-def case_rows(crates: list[CrateRecord]) -> list[dict]:
+def case_rows(crates: list[CrateRecord]) -> list[dict[str, Any]]:
     return [
         {
             "bymykel_id": crate.bymykel_id,
@@ -183,8 +184,8 @@ def case_rows(crates: list[CrateRecord]) -> list[dict]:
 
 def drop_rows(
     crates: list[CrateRecord], case_ids: dict[str, int], wears_by_skin: dict[str, tuple[str, ...]]
-) -> list[dict]:
-    rows: list[dict] = []
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
     for crate in crates:
         case_id = case_ids.get(crate.bymykel_id)
         if case_id is None:

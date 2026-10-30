@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -42,7 +43,7 @@ def create_scheduler() -> AsyncIOScheduler:
     return scheduler
 
 
-def _safe(func):
+def _safe(func: Callable[[], Awaitable[object]]) -> Callable[[], Awaitable[None]]:
     async def wrapper() -> None:
         try:
             await func()

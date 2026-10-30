@@ -253,6 +253,6 @@ def _drops(raw_items: object, *, is_special: bool) -> list[DropRecord]:
 
 
 def _float_or_none(value: object) -> float | None:
-    if value is None or value == "":
-        return None
-    return float(value)
+    if isinstance(value, int | float | str | Decimal) and value != "":
+        return float(value)
+    return None

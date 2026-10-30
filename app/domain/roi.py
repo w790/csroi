@@ -69,7 +69,7 @@ def evaluate_unboxing(
     expected: Decimal | None = None
     if missing == 0:
         expected = sum(
-            (probabilities[drop.name] * drop.price for drop in drops),
+            (probabilities[drop.name] * drop.price for drop in drops if drop.price is not None),
             Decimal(0),
         )
 

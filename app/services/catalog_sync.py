@@ -1,4 +1,5 @@
 import logging
+from typing import Any
 
 from app.collectors.sources import CollectorError
 from app.domain.records import CrateRecord, SkinRecord
@@ -54,11 +55,11 @@ def _prefer_crate(candidate: CrateRecord, current: CrateRecord) -> bool:
     return (candidate.def_index or 0) >= (current.def_index or 0)
 
 
-def _unique_items(rows: list[dict]) -> list[dict]:
-    by_hash: dict[str, dict] = {}
+def _unique_items(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_hash: dict[str, dict[str, Any]] = {}
     for row in rows:
         by_hash[row["market_hash_name"]] = row
-    by_variant: dict[tuple[str, str, str], dict] = {}
+    by_variant: dict[tuple[str, str, str], dict[str, Any]] = {}
     for row in by_hash.values():
         by_variant[(row["bymykel_id"], row["wear"], row["kind"])] = row
     return list(by_variant.values())

@@ -1,5 +1,8 @@
 import asyncio
 from decimal import Decimal
+from typing import Self
+
+import pytest
 
 from app.collectors.sources import CollectorError
 from app.domain.records import Listing
@@ -7,49 +10,49 @@ from app.jobs.tasks import _sync_prices
 
 
 class _Session:
-    async def __aenter__(self):
+    async def __aenter__(self) -> Self:
         return self
 
-    async def __aexit__(self, *_args):
+    async def __aexit__(self, *_args: object) -> bool:
         return False
 
-    async def commit(self):
+    async def commit(self) -> None:
         return None
 
 
 class _Repo:
-    def __init__(self, _session):
+    def __init__(self, _session: object) -> None:
         self.snapshots = 0
         self.windows = 0
 
-    async def upsert_listings(self, _listings):
+    async def upsert_listings(self, _listings: list[Listing]) -> int:
         return len(_listings)
 
-    async def capture_daily_snapshot(self, _source, _currency):
+    async def capture_daily_snapshot(self, _source: str, _currency: str) -> int:
         self.snapshots += 1
         return 1
 
-    async def upsert_windows(self, windows):
+    async def upsert_windows(self, windows: list[object]) -> int:
         self.windows += len(windows)
         return len(windows)
 
 
 class _Client:
-    def __init__(self, *_args, **_kwargs):
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
         return None
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> Self:
         return self
 
-    async def __aexit__(self, *_args):
+    async def __aexit__(self, *_args: object) -> bool:
         return False
 
 
 class _SkinportDown:
-    def __init__(self, *_args, **_kwargs):
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
         return None
 
-    async def fetch_listings(self):
+    async def fetch_listings(self) -> list[Listing]:
         return [
             Listing(
                 market_hash_name="Kilowatt Case",
@@ -63,11 +66,11 @@ class _SkinportDown:
             )
         ]
 
-    async def fetch_windows(self):
+    async def fetch_windows(self) -> list[object]:
         raise CollectorError("history down")
 
 
-def test_snapshot_is_saved_when_history_fails(monkeypatch) -> None:
+def test_snapshot_is_saved_when_history_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     repo = _Repo(None)
 
     monkeypatch.setattr("app.jobs.tasks.httpx.AsyncClient", _Client)

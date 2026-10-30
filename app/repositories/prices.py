@@ -1,7 +1,8 @@
 from collections.abc import Iterable, Sequence
 from datetime import UTC, date, datetime
+from typing import Any, cast
 
-from sqlalchemy import select, text
+from sqlalchemy import CursorResult, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,7 +11,7 @@ from app.domain.records import Listing, SaleWindow
 from app.models.price import Price, PriceSnapshot, PriceWindow
 
 
-def _chunks(rows: Sequence, size: int) -> Iterable[Sequence]:
+def _chunks[T](rows: Sequence[T], size: int) -> Iterable[Sequence[T]]:
     for index in range(0, len(rows), size):
         yield rows[index : index + size]
 
@@ -115,7 +116,7 @@ class PriceRepository:
             ),
             {"source": source, "currency": currency},
         )
-        return result.rowcount or 0
+        return cast(CursorResult[Any], result).rowcount or 0
 
     async def listings_for(
         self,

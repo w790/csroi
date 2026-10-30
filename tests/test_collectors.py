@@ -1,4 +1,5 @@
 import asyncio
+from collections.abc import Awaitable, Callable
 from decimal import Decimal
 
 import httpx
@@ -9,11 +10,11 @@ from app.collectors.sources import BymykelClient, CollectorError, SkinportClient
 BASE = "https://bymykel.test/api/en"
 
 
-def _rarity(name: str) -> dict:
+def _rarity(name: str) -> dict[str, str]:
     return {"id": name.lower(), "name": name, "color": "#eb4b4b"}
 
 
-def _crates_payload() -> list[dict]:
+def _crates_payload() -> list[object]:
     doppler = [
         {
             "id": f"skin-doppler-{phase}",
@@ -41,8 +42,11 @@ def _crates_payload() -> list[dict]:
     ]
 
 
-def _run(handler, call):
-    async def main():
+def _run[T](
+    handler: Callable[[httpx.Request], httpx.Response],
+    call: Callable[[httpx.AsyncClient], Awaitable[T]],
+) -> T:
+    async def main() -> T:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             return await call(client)
 
@@ -109,3 +113,18 @@ def test_skinport_rate_limit_is_reported() -> None:
                 client, "https://skinport.test/v1", 730, "USD"
             ).fetch_listings(),
         )
+
+
+def test_skin_float_range_keeps_zero_and_skips_missing() -> None:
+    payload = [
+        {"id": "skin-1", "name": "AK-47 | Redline", "min_float": 0, "max_float": 0.7},
+        {"id": "skin-2", "name": "★ Kukri Knife", "min_float": None, "max_float": ""},
+    ]
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=payload)
+
+    skins = _run(handler, lambda client: BymykelClient(client, BASE).fetch_skins())
+
+    assert (skins[0].min_float, skins[0].max_float) == (0.0, 0.7)
+    assert (skins[1].min_float, skins[1].max_float) == (None, None)
