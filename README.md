@@ -8,23 +8,21 @@
 
 ```bash
 docker compose up -d postgres redis
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-alembic upgrade head
-python -m app.jobs.load_catalog
-python -m app.jobs.sync_prices
-uvicorn app.main:app --host 127.0.0.1 --port 8000
+uv sync
+uv run alembic upgrade head
+uv run python -m app.jobs.load_catalog
+uv run python -m app.jobs.sync_prices
+uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
 Документация ручек: http://127.0.0.1:8000/docs
 
 ## Воркер
 
-Сбор цен запускайте одним процессом. Второй воркер или параллельный `python -m app.jobs.sync_prices` упирается в лимит Skinport: 8 запросов за 5 минут. Замок в Redis не даст второму процессу начать сбор, пока первый не закончит.
+Сбор цен запускайте одним процессом. Второй воркер или параллельный `uv run python -m app.jobs.sync_prices` упирается в лимит Skinport: 8 запросов за 5 минут. Замок в Redis не даст второму процессу начать сбор, пока первый не закончит.
 
 ```bash
-python -m app.jobs.worker
+uv run python -m app.jobs.worker
 ```
 
 Цены обновляются каждые 5 минут. Каталог — раз в сутки в 03:10 UTC и один раз при старте воркера.
@@ -50,3 +48,11 @@ curl "http://127.0.0.1:8000/api/v1/cases?sort=unboxing_roi&order=desc"
 - Каждая фаза Doppler и Gamma Doppler — отдельная запись пула. На Skinport у фаз одно имя и одна цена, поэтому у Doppler-ножа шанс в 5–7 раз выше, чем у других скинов того же ножа.
 - Цена предмета — Field-Tested, если она есть. Иначе берётся износ, который занимает большую часть float-диапазона скина: у Doppler (0–0.08) это Factory New.
 - `unboxing_roi = (EV − (цена кейса + ключ)) / (цена кейса + ключ)`. StatTrak не учитывается.
+
+## Проверки
+
+```bash
+make check
+```
+
+Команда запускает `ruff format`, `mypy --strict`, `ruff check --fix`, `deptry` и `pytest`. Разовые скрипты проверки источников лежат в `scripts/probes` и в проверки не входят.

@@ -1,12 +1,12 @@
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
 
 revision: str = "0001_initial"
-down_revision: Union[str, Sequence[str], None] = None
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = None
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
@@ -87,7 +87,9 @@ def upgrade() -> None:
         sa.Column("mean_price", sa.Numeric(14, 2), nullable=True),
         sa.Column("median_price", sa.Numeric(14, 2), nullable=True),
         sa.Column("quantity", sa.Integer(), nullable=True),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
         sa.UniqueConstraint(
             "market_hash_name",
             "source",
@@ -108,7 +110,9 @@ def upgrade() -> None:
         sa.Column("avg_price", sa.Numeric(14, 2), nullable=True),
         sa.Column("median_price", sa.Numeric(14, 2), nullable=True),
         sa.Column("volume", sa.Integer(), nullable=True),
-        sa.Column("fetched_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "fetched_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
         sa.UniqueConstraint(
             "market_hash_name",
             "source",

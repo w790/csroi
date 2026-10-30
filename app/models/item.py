@@ -6,9 +6,7 @@ from app.db.base import Base
 
 class Item(Base):
     __tablename__ = "items"
-    __table_args__ = (
-        UniqueConstraint("bymykel_id", "wear", "kind", name="uq_items_variant"),
-    )
+    __table_args__ = (UniqueConstraint("bymykel_id", "wear", "kind", name="uq_items_variant"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     market_hash_name: Mapped[str] = mapped_column(String(512), unique=True)

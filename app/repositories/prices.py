@@ -1,5 +1,5 @@
 from collections.abc import Iterable, Sequence
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -34,7 +34,7 @@ class PriceRepository:
                 "mean_price": item.mean_price,
                 "median_price": item.median_price,
                 "quantity": item.quantity,
-                "updated_at": datetime.now(timezone.utc),
+                "updated_at": datetime.now(UTC),
             }
             for item in folded.values()
         ]
@@ -57,7 +57,7 @@ class PriceRepository:
         return len(rows)
 
     async def upsert_windows(self, windows: list[SaleWindow], source: str = SOURCE_SKINPORT) -> int:
-        fetched_at = datetime.now(timezone.utc)
+        fetched_at = datetime.now(UTC)
         folded: dict[tuple[str, str, str], SaleWindow] = {}
         for item in windows:
             folded[(item.market_hash_name, item.currency, item.window)] = item

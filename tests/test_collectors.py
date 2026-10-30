@@ -85,7 +85,9 @@ def test_skinport_history_is_split_into_windows() -> None:
 
     windows = _run(
         handler,
-        lambda client: SkinportClient(client, "https://skinport.test/v1", 730, "USD").fetch_windows(),
+        lambda client: SkinportClient(
+            client, "https://skinport.test/v1", 730, "USD"
+        ).fetch_windows(),
     )
 
     by_window = {row.window: row for row in windows}
@@ -103,5 +105,7 @@ def test_skinport_rate_limit_is_reported() -> None:
     with pytest.raises(CollectorError, match="лимит"):
         _run(
             handler,
-            lambda client: SkinportClient(client, "https://skinport.test/v1", 730, "USD").fetch_listings(),
+            lambda client: SkinportClient(
+                client, "https://skinport.test/v1", 730, "USD"
+            ).fetch_listings(),
         )

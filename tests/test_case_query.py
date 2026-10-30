@@ -1,5 +1,5 @@
 import asyncio
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from fastapi.testclient import TestClient
@@ -11,7 +11,7 @@ from app.models.case import Case, CaseDrop
 from app.models.price import Price, PriceSnapshot
 from app.services.case_query import CaseQueryService
 
-UPDATED_AT = datetime(2026, 10, 1, 12, 0, tzinfo=timezone.utc)
+UPDATED_AT = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 
 TIERS = (
     ("blue", "Mil-Spec Grade"),
@@ -124,8 +124,12 @@ def _service() -> CaseQueryService:
         _price("★ Rich | Doppler (Factory New)", "1000"),
     ]
     snapshots = [
-        PriceSnapshot(market_hash_name="Rich", price=Decimal("0.90"), captured_on=date(2026, 9, 30)),
-        PriceSnapshot(market_hash_name="Rich", price=Decimal("1.00"), captured_on=date(2026, 10, 1)),
+        PriceSnapshot(
+            market_hash_name="Rich", price=Decimal("0.90"), captured_on=date(2026, 9, 30)
+        ),
+        PriceSnapshot(
+            market_hash_name="Rich", price=Decimal("1.00"), captured_on=date(2026, 10, 1)
+        ),
     ]
     return CaseQueryService(
         _Catalog([cheap, rich, unpriced], cheap_drops + rich_drops + unpriced_drops),
@@ -153,7 +157,9 @@ def test_detail_gives_doppler_its_phase_share() -> None:
     assert drops["★ Rich | Doppler"].probability == SPECIAL_ODDS * 7 / 8
     assert drops["★ Rich | Rust Coat"].probability == SPECIAL_ODDS / 8
     assert drops["★ Rich | Doppler"].market_hash_name == "★ Rich | Doppler (Factory New)"
-    assert view.expected_value == Decimal("0.10") * (1 - SPECIAL_ODDS) + Decimal("1000") * SPECIAL_ODDS
+    assert (
+        view.expected_value == Decimal("0.10") * (1 - SPECIAL_ODDS) + Decimal("1000") * SPECIAL_ODDS
+    )
 
 
 def test_history_returns_snapshots_for_the_window() -> None:
@@ -163,7 +169,7 @@ def test_history_returns_snapshots_for_the_window() -> None:
 
     assert history.market_hash_name == "Rich"
     assert [point.price for point in history.points] == [Decimal("0.90"), Decimal("1.00")]
-    assert (datetime.now(timezone.utc).date() - service._prices.since).days == 29
+    assert (datetime.now(UTC).date() - service._prices.since).days == 29
     assert asyncio.run(service.get_history(404, days=30)) is None
 
 

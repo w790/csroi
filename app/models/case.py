@@ -24,9 +24,7 @@ class Case(Base):
 
 class CaseDrop(Base):
     __tablename__ = "case_drops"
-    __table_args__ = (
-        UniqueConstraint("case_id", "name", name="uq_case_drops_case_name"),
-    )
+    __table_args__ = (UniqueConstraint("case_id", "name", name="uq_case_drops_case_name"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     case_id: Mapped[int] = mapped_column(

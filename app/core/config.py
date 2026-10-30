@@ -13,9 +13,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://csroi:csroi@localhost:5433/csroi"
     redis_url: str = "redis://localhost:6379/0"
 
-    bymykel_base_url: str = (
-        "https://raw.githubusercontent.com/ByMykel/CSGO-API/main/public/api/en"
-    )
+    bymykel_base_url: str = "https://raw.githubusercontent.com/ByMykel/CSGO-API/main/public/api/en"
     skinport_base_url: str = "https://api.skinport.com/v1"
     skinport_app_id: int = 730
     skinport_currency: str = "USD"

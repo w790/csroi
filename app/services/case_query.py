@@ -1,14 +1,14 @@
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 from app.core.config import settings
 from app.domain.constants import (
     SOURCE_SKINPORT,
     WEAPON_CASE_TYPE,
+    WINDOW_7D,
     WINDOW_24H,
     WINDOW_30D,
-    WINDOW_7D,
     WINDOW_90D,
 )
 from app.domain.names import price_candidates, wear_order
@@ -18,6 +18,7 @@ from app.models.case import Case, CaseDrop
 from app.models.price import Price, PriceWindow
 from app.repositories.catalog import CatalogRepository
 from app.repositories.prices import PriceRepository
+
 
 @dataclass(frozen=True)
 class DropView:
@@ -100,7 +101,7 @@ class CaseQueryService:
         if case is None:
             return None
         currency = settings.skinport_currency
-        since = datetime.now(timezone.utc).date() - timedelta(days=days - 1)
+        since = datetime.now(UTC).date() - timedelta(days=days - 1)
         snapshots = await self._prices.snapshots_for(
             case.market_hash_name,
             SOURCE_SKINPORT,
@@ -113,8 +114,7 @@ class CaseQueryService:
             market_hash_name=case.market_hash_name,
             currency=currency,
             points=tuple(
-                PricePointView(captured_on=row.captured_on, price=row.price)
-                for row in snapshots
+                PricePointView(captured_on=row.captured_on, price=row.price) for row in snapshots
             ),
         )
 

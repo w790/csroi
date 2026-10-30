@@ -4,9 +4,9 @@ from decimal import Decimal
 import httpx
 
 from app.domain.constants import (
+    WINDOW_7D,
     WINDOW_24H,
     WINDOW_30D,
-    WINDOW_7D,
     WINDOW_90D,
 )
 from app.domain.names import merge_phases

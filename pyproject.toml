@@ -1,0 +1,69 @@
+[project]
+name = "csroi"
+version = "0.1.0"
+description = "Аналитика окупаемости кейсов Counter-Strike 2"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "sqlalchemy[asyncio]>=2.0.36",
+    "asyncpg>=0.30",
+    "alembic>=1.14",
+    "pydantic>=2.10",
+    "pydantic-settings>=2.6",
+    "httpx>=0.28",
+    "brotli>=1.1",
+    "apscheduler>=3.10.4,<4",
+    "redis>=5.2",
+]
+
+[dependency-groups]
+dev = [
+    "deptry>=0.23",
+    "mypy>=1.13",
+    "pytest>=8.3",
+    "rich>=13",
+    "ruff>=0.8",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = ["scripts/probes"]
+
+[tool.ruff.lint]
+ignore = ["FURB157"]
+
+[tool.ruff.lint.isort]
+known-third-party = ["alembic"]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query"]
+
+[tool.ruff.lint.per-file-ignores]
+"alembic/env.py" = ["F401"]
+"app/api/v1/health.py" = ["BLE001"]
+"app/cache/prices.py" = ["BLE001"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+exclude = ["^scripts/probes/", "^\\.venv/"]
+
+[[tool.mypy.overrides]]
+module = ["apscheduler.*"]
+ignore_missing_imports = true
+
+[tool.deptry]
+exclude = ["\\.venv", "scripts/probes", "tests"]
+
+[tool.deptry.per_rule_ignores]
+DEP002 = ["uvicorn", "asyncpg", "brotli"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -16,7 +16,7 @@ def create_scheduler() -> AsyncIOScheduler:
         _safe(run_price_sync),
         "interval",
         minutes=settings.price_refresh_minutes,
-        next_run_time=datetime.now(timezone.utc),
+        next_run_time=datetime.now(UTC),
         id="sync_prices",
         replace_existing=True,
         max_instances=1,
@@ -35,7 +35,7 @@ def create_scheduler() -> AsyncIOScheduler:
     scheduler.add_job(
         _safe(run_catalog),
         "date",
-        run_date=datetime.now(timezone.utc),
+        run_date=datetime.now(UTC),
         id="sync_catalog_on_start",
         replace_existing=True,
     )

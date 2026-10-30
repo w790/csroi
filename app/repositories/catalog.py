@@ -181,7 +181,9 @@ def case_rows(crates: list[CrateRecord]) -> list[dict]:
     ]
 
 
-def drop_rows(crates: list[CrateRecord], case_ids: dict[str, int], wears_by_skin: dict[str, tuple[str, ...]]) -> list[dict]:
+def drop_rows(
+    crates: list[CrateRecord], case_ids: dict[str, int], wears_by_skin: dict[str, tuple[str, ...]]
+) -> list[dict]:
     rows: list[dict] = []
     for crate in crates:
         case_id = case_ids.get(crate.bymykel_id)
