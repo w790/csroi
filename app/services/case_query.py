@@ -12,7 +12,12 @@ from app.domain.constants import (
     WINDOW_90D,
 )
 from app.domain.names import price_candidates, wear_order
-from app.domain.pricing import choose_listing_price, investing_roi, resolve_wear_price
+from app.domain.pricing import (
+    choose_item_price,
+    choose_listing_price,
+    investing_roi,
+    resolve_wear_price,
+)
 from app.domain.roi import DropInput, UnboxingEvaluation, evaluate_unboxing
 from app.models.case import Case, CaseDrop
 from app.models.price import Price, PriceWindow
@@ -133,15 +138,19 @@ class CaseQueryService:
 
         currency = settings.skinport_currency
         listings = await self._prices.listings_for(list(names), SOURCE_SKINPORT, currency)
-        windows = await self._prices.windows_for(
-            [case.market_hash_name for case in cases],
-            SOURCE_SKINPORT,
-            currency,
-        )
+        windows = await self._prices.windows_for(list(names), SOURCE_SKINPORT, currency)
         floats = await self._catalog.float_ranges(sorted({drop.name for drop in drops}))
         amounts = {
             name: choose_listing_price(row.suggested_price, row.median_price, row.min_price)
             for name, row in listings.items()
+        }
+        item_prices = {
+            name: choose_item_price(
+                _sale_median(name, WINDOW_30D, windows),
+                _sale_median(name, WINDOW_90D, windows),
+                amounts.get(name),
+            )
+            for name in names
         }
         return [
             _to_detail(
@@ -149,6 +158,7 @@ class CaseQueryService:
                 drops_by_case.get(case.id, []),
                 listings,
                 amounts,
+                item_prices,
                 windows,
                 floats,
                 include_drops=include_drops,
@@ -162,6 +172,7 @@ def _to_detail(
     drops: list[CaseDrop],
     listings: dict[str, Price],
     amounts: dict[str, Decimal | None],
+    item_prices: dict[str, Decimal | None],
     windows: dict[tuple[str, str], PriceWindow],
     floats: dict[str, tuple[float | None, float | None]],
     *,
@@ -172,7 +183,7 @@ def _to_detail(
     resolved = [
         resolve_wear_price(
             drop.name,
-            amounts,
+            item_prices,
             wear_order(*floats.get(drop.name, (None, None))),
         )
         for drop in ordered
@@ -239,8 +250,14 @@ def _to_detail(
 def sort_views(views: list[CaseView], field: str, *, descending: bool) -> list[CaseView]:
     present = [view for view in views if getattr(view, field) is not None]
     missing = [view for view in views if getattr(view, field) is None]
-    present.sort(key=lambda view: getattr(view, field), reverse=descending)
+    present.sort(key=lambda view: _sort_key(getattr(view, field)), reverse=descending)
     return present + missing
+
+
+def _sort_key(value: str | Decimal) -> str | Decimal:
+    if isinstance(value, str):
+        return value.casefold()
+    return value
 
 
 def _current_price(
@@ -260,9 +277,16 @@ def _window_roi(
     windows: dict[tuple[str, str], PriceWindow],
     current: Decimal | None,
 ) -> Decimal | None:
+    return investing_roi(current, _sale_median(market_hash_name, window, windows))
+
+
+def _sale_median(
+    market_hash_name: str,
+    window: str,
+    windows: dict[tuple[str, str], PriceWindow],
+) -> Decimal | None:
     row = windows.get((market_hash_name, window))
-    baseline = row.median_price if row is not None else None
-    return investing_roi(current, baseline)
+    return row.median_price if row is not None else None
 
 
 def _drop_sort(drop: CaseDrop) -> tuple[int, int, str]:

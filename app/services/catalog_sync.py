@@ -1,6 +1,8 @@
 import logging
 from typing import Any
 
+from sqlalchemy.exc import IntegrityError
+
 from app.collectors.sources import CollectorError
 from app.domain.records import CrateRecord, SkinRecord
 from app.repositories.catalog import (
@@ -26,10 +28,14 @@ class CatalogSyncService:
         items = _unique_items(skin_item_rows(skins) + crate_item_rows(crates))
         cases = case_rows(crates)
         item_count = await self._repository.upsert_items(items)
-        case_count = await self._repository.upsert_cases(cases)
+        try:
+            case_count = await self._repository.upsert_cases(cases)
+        except IntegrityError as exc:
+            raise CollectorError(
+                "кейс с прежним bymykel_id сменил имя, каталог не обновлён"
+            ) from exc
         case_ids = await self._repository.ids_by_bymykel()
-        wears = {skin.bymykel_id: skin.wears for skin in skins}
-        drops = drop_rows(crates, case_ids, wears)
+        drops = drop_rows(crates, case_ids)
         drop_count = await self._repository.replace_drops(drops)
         logger.info(
             "catalog synced items=%s cases=%s drops=%s",

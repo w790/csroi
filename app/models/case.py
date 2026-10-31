@@ -37,6 +37,5 @@ class CaseDrop(Base):
     is_special: Mapped[bool] = mapped_column(Boolean)
     weight: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     image_url: Mapped[str | None] = mapped_column(Text)
-    price_market_hash_name: Mapped[str] = mapped_column(String(512), index=True)
 
     case: Mapped[Case] = relationship(back_populates="drops")

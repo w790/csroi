@@ -6,7 +6,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.constants import KIND_CRATE, KIND_SKIN
-from app.domain.names import market_hash_name, preferred_market_hash_name
+from app.domain.names import market_hash_name
 from app.domain.records import CrateRecord, SkinRecord
 from app.models.case import Case, CaseDrop
 from app.models.item import Item
@@ -182,16 +182,13 @@ def case_rows(crates: list[CrateRecord]) -> list[dict[str, Any]]:
     ]
 
 
-def drop_rows(
-    crates: list[CrateRecord], case_ids: dict[str, int], wears_by_skin: dict[str, tuple[str, ...]]
-) -> list[dict[str, Any]]:
+def drop_rows(crates: list[CrateRecord], case_ids: dict[str, int]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for crate in crates:
         case_id = case_ids.get(crate.bymykel_id)
         if case_id is None:
             continue
         for drop in crate.drops:
-            wears = wears_by_skin.get(drop.bymykel_id or "", ())
             rows.append(
                 {
                     "case_id": case_id,
@@ -201,7 +198,6 @@ def drop_rows(
                     "is_special": drop.is_special,
                     "weight": drop.weight,
                     "image_url": drop.image_url,
-                    "price_market_hash_name": preferred_market_hash_name(drop.name, wears),
                 }
             )
     return rows

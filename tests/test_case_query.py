@@ -1,5 +1,6 @@
 import asyncio
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import cast
@@ -14,9 +15,28 @@ from app.models.case import Case, CaseDrop
 from app.models.price import Price, PriceSnapshot, PriceWindow
 from app.repositories.catalog import CatalogRepository
 from app.repositories.prices import PriceRepository
-from app.services.case_query import CaseQueryService
+from app.services.case_query import CaseQueryService, CaseView, sort_views
 
 UPDATED_AT = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
+
+_view = CaseView(
+    id=1,
+    name="",
+    image_url=None,
+    market_hash_name="",
+    crate_type="Case",
+    case_price=None,
+    key_price=Decimal("2.49"),
+    expected_value=None,
+    unboxing_roi=None,
+    roi_7d=None,
+    roi_30d=None,
+    roi_90d=None,
+    odds_valid=False,
+    missing_prices=0,
+    prices_updated_at=None,
+    drops=(),
+)
 
 TIERS = (
     ("blue", "Mil-Spec Grade"),
@@ -43,7 +63,6 @@ def _weapon_case(case_id: int, name: str) -> tuple[Case, list[CaseDrop]]:
             is_special=False,
             weight=1,
             image_url=None,
-            price_market_hash_name=f"{name} {color}",
         )
         for color, rarity in TIERS
     ]
@@ -55,7 +74,6 @@ def _weapon_case(case_id: int, name: str) -> tuple[Case, list[CaseDrop]]:
             is_special=True,
             weight=7,
             image_url=None,
-            price_market_hash_name=f"★ {name} | Doppler",
         ),
         CaseDrop(
             case_id=case_id,
@@ -64,7 +82,6 @@ def _weapon_case(case_id: int, name: str) -> tuple[Case, list[CaseDrop]]:
             is_special=True,
             weight=1,
             image_url=None,
-            price_market_hash_name=f"★ {name} | Rust Coat",
         ),
     ]
     return case, drops
@@ -99,8 +116,14 @@ class _Catalog:
 
 
 class _Prices:
-    def __init__(self, listings: list[Price], snapshots: list[PriceSnapshot]) -> None:
+    def __init__(
+        self,
+        listings: list[Price],
+        snapshots: list[PriceSnapshot],
+        windows: list[PriceWindow],
+    ) -> None:
         self._listings = {row.market_hash_name: row for row in listings}
+        self._windows = {(row.market_hash_name, row.window): row for row in windows}
         self._snapshots = list(snapshots)
         self.since: date | None = None
 
@@ -110,9 +133,9 @@ class _Prices:
         return {name: row for name, row in self._listings.items() if name in names}
 
     async def windows_for(
-        self, _names: list[str], _source: str, _currency: str
+        self, names: list[str], _source: str, _currency: str
     ) -> dict[tuple[str, str], PriceWindow]:
-        return {}
+        return {key: row for key, row in self._windows.items() if key[0] in names}
 
     async def snapshots_for(
         self, _name: str, _source: str, _currency: str, since: date
@@ -121,7 +144,15 @@ class _Prices:
         return self._snapshots
 
 
-def _service() -> CaseQueryService:
+def _window(name: str, window: str, median: str | None) -> PriceWindow:
+    return PriceWindow(
+        market_hash_name=name,
+        window=window,
+        median_price=Decimal(median) if median is not None else None,
+    )
+
+
+def _service(windows: tuple[PriceWindow, ...] = ()) -> CaseQueryService:
     cheap, cheap_drops = _weapon_case(1, "Cheap")
     rich, rich_drops = _weapon_case(2, "Rich")
     unpriced, unpriced_drops = _weapon_case(3, "Unpriced")
@@ -147,7 +178,7 @@ def _service() -> CaseQueryService:
             CatalogRepository,
             _Catalog([cheap, rich, unpriced], cheap_drops + rich_drops + unpriced_drops),
         ),
-        cast(PriceRepository, _Prices(listings, snapshots)),
+        cast(PriceRepository, _Prices(listings, snapshots, list(windows))),
     )
 
 
@@ -164,6 +195,15 @@ def test_list_sorts_by_roi_and_keeps_unpriced_last() -> None:
     assert descending[-1].prices_updated_at is None
 
 
+def test_name_sort_ignores_case() -> None:
+    views = [replace(_view, name=name) for name in ("eSports", "Winter", "Chroma")]
+    assert [view.name for view in sort_views(views, "name", descending=False)] == [
+        "Chroma",
+        "eSports",
+        "Winter",
+    ]
+
+
 def test_detail_gives_doppler_its_phase_share() -> None:
     view = asyncio.run(_service().get_case(2))
     assert view is not None
@@ -175,6 +215,38 @@ def test_detail_gives_doppler_its_phase_share() -> None:
     assert (
         view.expected_value == Decimal("0.10") * (1 - SPECIAL_ODDS) + Decimal("1000") * SPECIAL_ODDS
     )
+
+
+def test_item_price_uses_sales_median_before_listing() -> None:
+    service = _service(
+        (
+            _window("★ Rich | Doppler (Factory New)", "30d", "200"),
+            _window("★ Rich | Doppler (Factory New)", "90d", "300"),
+            _window("★ Rich | Rust Coat", "30d", None),
+            _window("★ Rich | Rust Coat", "90d", "400"),
+            _window("Rich", "30d", "0.70"),
+        )
+    )
+
+    view = asyncio.run(service.get_case(2))
+    assert view is not None
+
+    prices = {drop.name: drop.price for drop in view.drops}
+    assert prices["★ Rich | Doppler"] == Decimal("200")
+    assert prices["★ Rich | Rust Coat"] == Decimal("400")
+    assert prices["Rich blue"] == Decimal("0.10")
+    assert view.case_price == Decimal("1.00")
+
+
+def test_item_without_listing_is_priced_by_past_sales() -> None:
+    service = _service((_window("Unpriced blue", "30d", "0.20"),))
+
+    view = asyncio.run(service.get_case(3))
+    assert view is not None
+
+    prices = {drop.name: drop.price for drop in view.drops}
+    assert prices["Unpriced blue"] == Decimal("0.20")
+    assert view.missing_prices == 5
 
 
 def test_history_returns_snapshots_for_the_window() -> None:

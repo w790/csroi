@@ -15,6 +15,17 @@ def choose_listing_price(
     return None
 
 
+def choose_item_price(
+    median_30d: Decimal | None,
+    median_90d: Decimal | None,
+    listing: Decimal | None,
+) -> Decimal | None:
+    for value in (median_30d, median_90d, listing):
+        if value is not None:
+            return value
+    return None
+
+
 def resolve_wear_price(
     base_name: str,
     amounts: dict[str, Decimal | None],

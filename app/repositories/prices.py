@@ -105,12 +105,12 @@ class PriceRepository:
                     market_hash_name,
                     source,
                     currency,
-                    COALESCE(suggested_price, median_price, min_price),
+                    COALESCE(median_price, suggested_price, min_price),
                     (now() AT TIME ZONE 'UTC')::date
                 FROM prices
                 WHERE source = :source
                   AND currency = :currency
-                  AND COALESCE(suggested_price, median_price, min_price) IS NOT NULL
+                  AND COALESCE(median_price, suggested_price, min_price) IS NOT NULL
                 ON CONFLICT ON CONSTRAINT uq_price_snapshots_identity DO NOTHING
                 """
             ),

@@ -1,9 +1,14 @@
 from decimal import Decimal
 
 from app.domain.constants import WEAR_PREFERENCE
-from app.domain.names import merge_phases, preferred_market_hash_name, wear_order
+from app.domain.names import merge_phases, price_candidates, wear_order
 from app.domain.odds import SPECIAL_ODDS, TIER_ODDS
-from app.domain.pricing import choose_listing_price, investing_roi, resolve_wear_price
+from app.domain.pricing import (
+    choose_item_price,
+    choose_listing_price,
+    investing_roi,
+    resolve_wear_price,
+)
 from app.domain.records import DropRecord
 from app.domain.roi import DropInput, evaluate_unboxing
 
@@ -13,24 +18,9 @@ def test_tier_odds_sum_to_one() -> None:
     assert total == Decimal("1.0000")
 
 
-def test_preferred_wear_is_field_tested() -> None:
-    assert (
-        preferred_market_hash_name(
-            "AK-47 | Redline",
-            ["Factory New", "Minimal Wear", "Field-Tested"],
-        )
-        == "AK-47 | Redline (Field-Tested)"
-    )
-
-
 def test_price_candidates_try_field_tested_before_factory_new() -> None:
-    names = preferred_market_hash_name("AK-47 | Redline", ["Field-Tested"])
-    assert names == "AK-47 | Redline (Field-Tested)"
-    from app.domain.names import price_candidates
-
     assert price_candidates("★ Karambit | Fade")[0].endswith("(Field-Tested)")
     assert price_candidates("★ Karambit | Fade")[-1] == "★ Karambit | Fade"
-    assert preferred_market_hash_name("★ Bayonet", []) == "★ Bayonet"
 
 
 def test_duplicate_knife_phases_collapse_to_one_name() -> None:
@@ -69,6 +59,13 @@ def test_listing_price_prefers_suggested() -> None:
     assert choose_listing_price(Decimal("10"), Decimal("8"), Decimal("7")) == Decimal("10")
     assert choose_listing_price(None, Decimal("8"), Decimal("7")) == Decimal("8")
     assert choose_listing_price(None, None, None) is None
+
+
+def test_item_price_prefers_recent_sales_over_listing() -> None:
+    assert choose_item_price(Decimal("2014"), Decimal("2066"), Decimal("11456")) == Decimal("2014")
+    assert choose_item_price(None, Decimal("2066"), Decimal("11456")) == Decimal("2066")
+    assert choose_item_price(None, None, Decimal("11456")) == Decimal("11456")
+    assert choose_item_price(None, None, None) is None
 
 
 def test_investing_roi() -> None:

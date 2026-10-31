@@ -10,20 +10,6 @@ def market_hash_name(base_name: str, wear: str | None) -> str:
     return base_name
 
 
-def preferred_wear(wears: tuple[str, ...] | list[str]) -> str | None:
-    available = set(wears)
-    for wear in WEAR_PREFERENCE:
-        if wear in available:
-            return wear
-    if wears:
-        return wears[0]
-    return None
-
-
-def preferred_market_hash_name(base_name: str, wears: tuple[str, ...] | list[str]) -> str:
-    return market_hash_name(base_name, preferred_wear(wears))
-
-
 def wear_order(min_float: float | None, max_float: float | None) -> tuple[str, ...]:
     if min_float is None or max_float is None or max_float <= min_float:
         return WEAR_PREFERENCE
