@@ -139,11 +139,16 @@ class CaseQueryService:
             currency,
         )
         floats = await self._catalog.float_ranges(sorted({drop.name for drop in drops}))
+        amounts = {
+            name: choose_listing_price(row.suggested_price, row.median_price, row.min_price)
+            for name, row in listings.items()
+        }
         return [
             _to_detail(
                 case,
                 drops_by_case.get(case.id, []),
                 listings,
+                amounts,
                 windows,
                 floats,
                 include_drops=include_drops,
@@ -156,16 +161,13 @@ def _to_detail(
     case: Case,
     drops: list[CaseDrop],
     listings: dict[str, Price],
+    amounts: dict[str, Decimal | None],
     windows: dict[tuple[str, str], PriceWindow],
     floats: dict[str, tuple[float | None, float | None]],
     *,
     include_drops: bool,
 ) -> CaseView:
     ordered = sorted(drops, key=_drop_sort)
-    amounts = {
-        name: choose_listing_price(row.suggested_price, row.median_price, row.min_price)
-        for name, row in listings.items()
-    }
     case_price = amounts.get(case.market_hash_name)
     resolved = [
         resolve_wear_price(

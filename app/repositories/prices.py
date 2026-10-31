@@ -106,7 +106,7 @@ class PriceRepository:
                     source,
                     currency,
                     COALESCE(suggested_price, median_price, min_price),
-                    CURRENT_DATE
+                    (now() AT TIME ZONE 'UTC')::date
                 FROM prices
                 WHERE source = :source
                   AND currency = :currency

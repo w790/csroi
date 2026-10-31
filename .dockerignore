@@ -5,3 +5,5 @@
 .env
 .git
 **/*.pyc
+.mypy_cache
+.ruff_cache

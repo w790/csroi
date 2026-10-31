@@ -31,7 +31,9 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://csroi:csroi@postgres:5432/csroi
       REDIS_URL: redis://redis:6379/0
-      SKINPORT_CURRENCY: USD
+      SKINPORT_CURRENCY: ${SKINPORT_CURRENCY:-USD}
+      KEY_PRICE_USD: ${KEY_PRICE_USD:-2.49}
+      PRICE_REFRESH_MINUTES: ${PRICE_REFRESH_MINUTES:-5}
     ports:
       - "8000:8000"
     depends_on:
@@ -46,7 +48,9 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://csroi:csroi@postgres:5432/csroi
       REDIS_URL: redis://redis:6379/0
-      SKINPORT_CURRENCY: USD
+      SKINPORT_CURRENCY: ${SKINPORT_CURRENCY:-USD}
+      KEY_PRICE_USD: ${KEY_PRICE_USD:-2.49}
+      PRICE_REFRESH_MINUTES: ${PRICE_REFRESH_MINUTES:-5}
     depends_on:
       postgres:
         condition: service_healthy

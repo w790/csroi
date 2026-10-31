@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 _redis: Redis | None = None
 _LOCK_KEY = "locks:skinport-sync"
 _LOCK_TTL_SECONDS = 300
+_SOCKET_TIMEOUT_SECONDS = 5
 _RELEASE_SCRIPT = """
 if redis.call("get", KEYS[1]) == ARGV[1] then
     return redis.call("del", KEYS[1])
@@ -21,7 +22,12 @@ return 0
 def get_redis() -> Redis:
     global _redis
     if _redis is None:
-        _redis = Redis.from_url(settings.redis_url, decode_responses=True)
+        _redis = Redis.from_url(
+            settings.redis_url,
+            decode_responses=True,
+            socket_connect_timeout=_SOCKET_TIMEOUT_SECONDS,
+            socket_timeout=_SOCKET_TIMEOUT_SECONDS,
+        )
     return _redis
 
 

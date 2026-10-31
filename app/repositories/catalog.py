@@ -59,10 +59,10 @@ class CatalogRepository:
             stmt = pg_insert(Case).values(list(batch))
             excluded = stmt.excluded
             stmt = stmt.on_conflict_do_update(
-                index_elements=[Case.bymykel_id],
+                index_elements=[Case.market_hash_name],
                 set_={
+                    "bymykel_id": excluded.bymykel_id,
                     "name": excluded.name,
-                    "market_hash_name": excluded.market_hash_name,
                     "crate_type": excluded.crate_type,
                     "image_url": excluded.image_url,
                     "def_index": excluded.def_index,

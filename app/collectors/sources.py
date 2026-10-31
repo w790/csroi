@@ -225,6 +225,8 @@ class SkinportClient:
             raise CollectorError("skinport: лимит 8 запросов за 5 минут")
         if response.status_code == 406:
             raise CollectorError("skinport: нужен заголовок Accept-Encoding: br")
+        if response.status_code == 403:
+            raise CollectorError("skinport: запрос заблокирован Cloudflare, повторим позже")
         if response.status_code != 200:
             raise CollectorError(f"skinport {path}: HTTP {response.status_code}")
         return _loads(response.content)

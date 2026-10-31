@@ -9,10 +9,14 @@ from app.core.config import settings
 from app.jobs.tasks import run_catalog, run_price_sync
 
 logger = logging.getLogger(__name__)
+MISFIRE_GRACE_SECONDS = 300
 
 
 def create_scheduler() -> AsyncIOScheduler:
-    scheduler = AsyncIOScheduler(timezone="UTC")
+    scheduler = AsyncIOScheduler(
+        timezone="UTC",
+        job_defaults={"misfire_grace_time": MISFIRE_GRACE_SECONDS},
+    )
     scheduler.add_job(
         _safe(run_price_sync),
         "interval",

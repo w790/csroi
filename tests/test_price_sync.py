@@ -7,6 +7,7 @@ import pytest
 from app.collectors.sources import CollectorError
 from app.domain.records import Listing
 from app.jobs.tasks import _sync_prices
+from app.jobs.worker import MISFIRE_GRACE_SECONDS, create_scheduler
 
 
 class _Session:
@@ -82,3 +83,15 @@ def test_snapshot_is_saved_when_history_fails(monkeypatch: pytest.MonkeyPatch) -
 
     assert repo.snapshots == 1
     assert repo.windows == 0
+
+
+def test_worker_tolerates_a_busy_event_loop() -> None:
+    async def grace_times() -> list[int]:
+        scheduler = create_scheduler()
+        scheduler.start(paused=True)
+        try:
+            return [job.misfire_grace_time for job in scheduler.get_jobs()]
+        finally:
+            scheduler.shutdown(wait=False)
+
+    assert asyncio.run(grace_times()) == [MISFIRE_GRACE_SECONDS] * 3

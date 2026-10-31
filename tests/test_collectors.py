@@ -128,3 +128,16 @@ def test_skin_float_range_keeps_zero_and_skips_missing() -> None:
 
     assert (skins[0].min_float, skins[0].max_float) == (0.0, 0.7)
     assert (skins[1].min_float, skins[1].max_float) == (None, None)
+
+
+def test_skinport_cloudflare_block_is_reported() -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403)
+
+    with pytest.raises(CollectorError, match="Cloudflare"):
+        _run(
+            handler,
+            lambda client: SkinportClient(
+                client, "https://skinport.test/v1", 730, "USD"
+            ).fetch_listings(),
+        )
