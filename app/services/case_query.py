@@ -1,8 +1,9 @@
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from enum import StrEnum
 
-from app.core.config import settings
 from app.domain.constants import (
     SOURCE_SKINPORT,
     WEAPON_CASE_TYPE,
@@ -11,18 +12,29 @@ from app.domain.constants import (
     WINDOW_30D,
     WINDOW_90D,
 )
-from app.domain.names import price_candidates, wear_order
+from app.domain.names import price_candidates
 from app.domain.pricing import (
     choose_item_price,
     choose_listing_price,
     investing_roi,
     resolve_wear_price,
 )
-from app.domain.roi import DropInput, UnboxingEvaluation, evaluate_unboxing
+from app.domain.roi import DropInput, UnboxingEvaluation, evaluate_unboxing, not_evaluated
+from app.domain.wear import wear_order
 from app.models.case import Case, CaseDrop
 from app.models.price import Price, PriceWindow
 from app.repositories.catalog import CatalogRepository
 from app.repositories.prices import PriceRepository
+
+
+class SortField(StrEnum):
+    name = "name"
+    case_price = "case_price"
+    expected_value = "expected_value"
+    unboxing_roi = "unboxing_roi"
+    roi_7d = "roi_7d"
+    roi_30d = "roi_30d"
+    roi_90d = "roi_90d"
 
 
 @dataclass(frozen=True)
@@ -79,217 +91,239 @@ _RARITY_ORDER = {
 }
 
 
+_SORT_KEYS: dict[SortField, Callable[[CaseView], str | Decimal | None]] = {
+    SortField.name: lambda view: view.name.casefold(),
+    SortField.case_price: lambda view: view.case_price,
+    SortField.expected_value: lambda view: view.expected_value,
+    SortField.unboxing_roi: lambda view: view.unboxing_roi,
+    SortField.roi_7d: lambda view: view.roi_7d,
+    SortField.roi_30d: lambda view: view.roi_30d,
+    SortField.roi_90d: lambda view: view.roi_90d,
+}
+
+
 class CaseQueryService:
-    def __init__(self, catalog: CatalogRepository, prices: PriceRepository) -> None:
+    def __init__(
+        self,
+        catalog: CatalogRepository,
+        prices: PriceRepository,
+        *,
+        currency: str,
+        key_price: Decimal,
+    ) -> None:
         self._catalog = catalog
         self._prices = prices
+        self._currency = currency
+        self._key_price = key_price
 
     async def list_cases(
         self,
         crate_type: str = WEAPON_CASE_TYPE,
-        sort: str = "name",
+        sort: SortField = SortField.name,
         descending: bool = False,
     ) -> list[CaseView]:
         cases = await self._catalog.list_cases(crate_type)
-        views = await self._compose(cases, include_drops=False)
+        views = await self._build_views(cases, include_drops=False)
         return sort_views(views, sort, descending=descending)
 
     async def get_case(self, case_id: int) -> CaseView | None:
         case = await self._catalog.get_case(case_id)
         if case is None:
             return None
-        details = await self._compose([case], include_drops=True)
-        return details[0]
+        views = await self._build_views([case], include_drops=True)
+        return views[0]
 
     async def get_history(self, case_id: int, days: int) -> CaseHistoryView | None:
         case = await self._catalog.get_case(case_id)
         if case is None:
             return None
-        currency = settings.skinport_currency
         since = datetime.now(UTC).date() - timedelta(days=days - 1)
         snapshots = await self._prices.snapshots_for(
             case.market_hash_name,
             SOURCE_SKINPORT,
-            currency,
+            self._currency,
             since,
+        )
+        points = tuple(
+            PricePointView(captured_on=row.captured_on, price=row.price) for row in snapshots
         )
         return CaseHistoryView(
             id=case.id,
             name=case.name,
             market_hash_name=case.market_hash_name,
-            currency=currency,
-            points=tuple(
-                PricePointView(captured_on=row.captured_on, price=row.price) for row in snapshots
-            ),
+            currency=self._currency,
+            points=points,
         )
 
-    async def _compose(self, cases: list[Case], *, include_drops: bool) -> list[CaseView]:
+    async def _build_views(self, cases: list[Case], *, include_drops: bool) -> list[CaseView]:
         if not cases:
             return []
-        case_ids = [case.id for case in cases]
-        drops = await self._catalog.drops_for(case_ids)
-        drops_by_case: dict[int, list[CaseDrop]] = {case_id: [] for case_id in case_ids}
-        names: set[str] = set()
-        for case in cases:
-            names.add(case.market_hash_name)
-        for drop in drops:
-            drops_by_case[drop.case_id].append(drop)
-            names.update(price_candidates(drop.name))
+        market = await self._load_market(cases)
+        return [self._build_view(case, market, include_drops=include_drops) for case in cases]
 
-        currency = settings.skinport_currency
-        listings = await self._prices.listings_for(list(names), SOURCE_SKINPORT, currency)
-        windows = await self._prices.windows_for(list(names), SOURCE_SKINPORT, currency)
+    async def _load_market(self, cases: list[Case]) -> "_Market":
+        drops = await self._catalog.drops_for([case.id for case in cases])
+        names = _price_names(cases, drops)
+        listings = await self._prices.listings_for(names, SOURCE_SKINPORT, self._currency)
+        windows = await self._prices.windows_for(names, SOURCE_SKINPORT, self._currency)
         floats = await self._catalog.float_ranges(sorted({drop.name for drop in drops}))
-        amounts = {
-            name: choose_listing_price(row.suggested_price, row.median_price, row.min_price)
-            for name, row in listings.items()
-        }
-        item_prices = {
-            name: choose_item_price(
-                _sale_median(name, WINDOW_30D, windows),
-                _sale_median(name, WINDOW_90D, windows),
-                amounts.get(name),
-            )
-            for name in names
-        }
-        return [
-            _to_detail(
-                case,
-                drops_by_case.get(case.id, []),
-                listings,
-                amounts,
-                item_prices,
-                windows,
-                floats,
-                include_drops=include_drops,
-            )
-            for case in cases
-        ]
-
-
-def _to_detail(
-    case: Case,
-    drops: list[CaseDrop],
-    listings: dict[str, Price],
-    amounts: dict[str, Decimal | None],
-    item_prices: dict[str, Decimal | None],
-    windows: dict[tuple[str, str], PriceWindow],
-    floats: dict[str, tuple[float | None, float | None]],
-    *,
-    include_drops: bool,
-) -> CaseView:
-    ordered = sorted(drops, key=_drop_sort)
-    case_price = amounts.get(case.market_hash_name)
-    resolved = [
-        resolve_wear_price(
-            drop.name,
-            item_prices,
-            wear_order(*floats.get(drop.name, (None, None))),
+        return _Market(
+            drops_by_case=_group_drops(cases, drops),
+            listings=listings,
+            windows=windows,
+            floats=floats,
         )
-        for drop in ordered
+
+    def _build_view(self, case: Case, market: "_Market", *, include_drops: bool) -> CaseView:
+        ordered = sorted(market.drops_by_case[case.id], key=_drop_sort_key)
+        priced = [_price_drop(drop, market) for drop in ordered]
+        case_price = market.listing_price(case.market_hash_name)
+        evaluation = self._evaluate(case, priced, case_price)
+        current = market.investing_current_price(case.market_hash_name)
+        return CaseView(
+            id=case.id,
+            name=case.name,
+            image_url=case.image_url,
+            market_hash_name=case.market_hash_name,
+            crate_type=case.crate_type,
+            case_price=case_price,
+            key_price=self._key_price,
+            expected_value=evaluation.expected_value,
+            unboxing_roi=evaluation.roi,
+            roi_7d=investing_roi(current, market.sale_median(case.market_hash_name, WINDOW_7D)),
+            roi_30d=investing_roi(current, market.sale_median(case.market_hash_name, WINDOW_30D)),
+            roi_90d=investing_roi(current, market.sale_median(case.market_hash_name, WINDOW_90D)),
+            odds_valid=evaluation.odds_valid,
+            missing_prices=evaluation.missing_prices,
+            prices_updated_at=market.listing_updated_at(case.market_hash_name),
+            drops=_drop_views(priced, evaluation) if include_drops else (),
+        )
+
+    def _evaluate(
+        self,
+        case: Case,
+        priced: list["_PricedDrop"],
+        case_price: Decimal | None,
+    ) -> UnboxingEvaluation:
+        if case.crate_type != WEAPON_CASE_TYPE:
+            return not_evaluated()
+        inputs = [_drop_input(item) for item in priced]
+        return evaluate_unboxing(inputs, case_price, self._key_price)
+
+
+def sort_views(views: list[CaseView], field: SortField, *, descending: bool) -> list[CaseView]:
+    key = _SORT_KEYS[field]
+    keyed = [(key(view), view) for view in views]
+    present: list[tuple[str | Decimal, CaseView]] = [
+        (value, view) for value, view in keyed if value is not None
     ]
-    inputs = [
-        DropInput(
-            name=drop.name,
-            rarity=drop.rarity,
-            is_special=drop.is_special,
-            price=amount,
-            weight=drop.weight,
-        )
-        for drop, (amount, _) in zip(ordered, resolved, strict=True)
-    ]
-    if case.crate_type == WEAPON_CASE_TYPE:
-        evaluation = evaluate_unboxing(inputs, case_price, settings.key_price_usd)
-    else:
-        evaluation = UnboxingEvaluation(
-            expected_value=None,
-            cost=None,
-            roi=None,
-            missing_prices=0,
-            odds_valid=False,
-            probabilities={},
-        )
+    missing = [view for value, view in keyed if value is None]
+    present.sort(key=lambda pair: pair[0], reverse=descending)
+    return [view for _, view in present] + missing
 
-    current = _current_price(case.market_hash_name, windows, case_price)
-    case_listing = listings.get(case.market_hash_name)
-    drop_views: tuple[DropView, ...] = ()
-    if include_drops:
-        drop_views = tuple(
-            DropView(
-                name=drop.name,
-                rarity=drop.rarity,
-                is_special=drop.is_special,
-                probability=evaluation.probabilities.get(drop.name),
-                price=amount,
-                market_hash_name=priced_as,
-                image_url=drop.image_url,
-            )
-            for drop, (amount, priced_as) in zip(ordered, resolved, strict=True)
+
+@dataclass(frozen=True)
+class _Market:
+    drops_by_case: dict[int, list[CaseDrop]]
+    listings: dict[str, Price]
+    windows: dict[tuple[str, str], PriceWindow]
+    floats: dict[str, tuple[float | None, float | None]]
+
+    def listing_price(self, name: str) -> Decimal | None:
+        row = self.listings.get(name)
+        if row is None:
+            return None
+        return choose_listing_price(row.suggested_price, row.median_price, row.min_price)
+
+    def item_price(self, name: str) -> Decimal | None:
+        return choose_item_price(
+            self.sale_median(name, WINDOW_30D),
+            self.sale_median(name, WINDOW_90D),
+            self.listing_price(name),
         )
 
-    return CaseView(
-        id=case.id,
-        name=case.name,
-        image_url=case.image_url,
-        market_hash_name=case.market_hash_name,
-        crate_type=case.crate_type,
-        case_price=case_price,
-        key_price=settings.key_price_usd,
-        expected_value=evaluation.expected_value,
-        unboxing_roi=evaluation.roi,
-        roi_7d=_window_roi(case.market_hash_name, WINDOW_7D, windows, current),
-        roi_30d=_window_roi(case.market_hash_name, WINDOW_30D, windows, current),
-        roi_90d=_window_roi(case.market_hash_name, WINDOW_90D, windows, current),
-        odds_valid=evaluation.odds_valid,
-        missing_prices=evaluation.missing_prices,
-        prices_updated_at=case_listing.updated_at if case_listing is not None else None,
-        drops=drop_views,
-    )
+    def sale_median(self, name: str, window: str) -> Decimal | None:
+        row = self.windows.get((name, window))
+        if row is None:
+            return None
+        return row.median_price
+
+    def investing_current_price(self, name: str) -> Decimal | None:
+        recent = self.sale_median(name, WINDOW_24H)
+        if recent is not None:
+            return recent
+        return self.listing_price(name)
+
+    def listing_updated_at(self, name: str) -> datetime | None:
+        row = self.listings.get(name)
+        if row is None:
+            return None
+        return row.updated_at
+
+    def wears_for(self, drop_name: str) -> tuple[str, ...]:
+        low, high = self.floats.get(drop_name, (None, None))
+        return wear_order(low, high)
 
 
-def sort_views(views: list[CaseView], field: str, *, descending: bool) -> list[CaseView]:
-    present = [view for view in views if getattr(view, field) is not None]
-    missing = [view for view in views if getattr(view, field) is None]
-    present.sort(key=lambda view: _sort_key(getattr(view, field)), reverse=descending)
-    return present + missing
+@dataclass(frozen=True)
+class _PricedDrop:
+    drop: CaseDrop
+    price: Decimal | None
+    priced_as: str
 
 
-def _sort_key(value: str | Decimal) -> str | Decimal:
-    if isinstance(value, str):
-        return value.casefold()
-    return value
+def _price_names(cases: list[Case], drops: list[CaseDrop]) -> list[str]:
+    names = {case.market_hash_name for case in cases}
+    for drop in drops:
+        names.update(price_candidates(drop.name))
+    return list(names)
 
 
-def _current_price(
-    market_hash_name: str,
-    windows: dict[tuple[str, str], PriceWindow],
-    case_price: Decimal | None,
-) -> Decimal | None:
-    recent = windows.get((market_hash_name, WINDOW_24H))
-    if recent is not None and recent.median_price is not None:
-        return recent.median_price
-    return case_price
+def _group_drops(cases: list[Case], drops: list[CaseDrop]) -> dict[int, list[CaseDrop]]:
+    grouped: dict[int, list[CaseDrop]] = {case.id: [] for case in cases}
+    for drop in drops:
+        grouped[drop.case_id].append(drop)
+    return grouped
 
 
-def _window_roi(
-    market_hash_name: str,
-    window: str,
-    windows: dict[tuple[str, str], PriceWindow],
-    current: Decimal | None,
-) -> Decimal | None:
-    return investing_roi(current, _sale_median(market_hash_name, window, windows))
-
-
-def _sale_median(
-    market_hash_name: str,
-    window: str,
-    windows: dict[tuple[str, str], PriceWindow],
-) -> Decimal | None:
-    row = windows.get((market_hash_name, window))
-    return row.median_price if row is not None else None
-
-
-def _drop_sort(drop: CaseDrop) -> tuple[int, int, str]:
+def _drop_sort_key(drop: CaseDrop) -> tuple[int, int, str]:
     if drop.is_special:
         return (1, 0, drop.name)
     return (0, _RARITY_ORDER.get(drop.rarity or "", 9), drop.name)
+
+
+def _price_drop(drop: CaseDrop, market: _Market) -> _PricedDrop:
+    wears = market.wears_for(drop.name)
+    candidates = price_candidates(drop.name, wears)
+    prices = {name: market.item_price(name) for name in candidates}
+    price, priced_as = resolve_wear_price(drop.name, prices, wears)
+    return _PricedDrop(drop=drop, price=price, priced_as=priced_as)
+
+
+def _drop_input(item: _PricedDrop) -> DropInput:
+    return DropInput(
+        name=item.drop.name,
+        rarity=item.drop.rarity,
+        is_special=item.drop.is_special,
+        price=item.price,
+        weight=item.drop.weight,
+    )
+
+
+def _drop_views(
+    priced: list[_PricedDrop],
+    evaluation: UnboxingEvaluation,
+) -> tuple[DropView, ...]:
+    return tuple(_drop_view(item, evaluation) for item in priced)
+
+
+def _drop_view(item: _PricedDrop, evaluation: UnboxingEvaluation) -> DropView:
+    return DropView(
+        name=item.drop.name,
+        rarity=item.drop.rarity,
+        is_special=item.drop.is_special,
+        probability=evaluation.probabilities.get(item.drop.name),
+        price=item.price,
+        market_hash_name=item.priced_as,
+        image_url=item.drop.image_url,
+    )

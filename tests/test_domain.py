@@ -1,8 +1,9 @@
 from decimal import Decimal
 
 from app.domain.constants import WEAR_PREFERENCE
-from app.domain.names import merge_phases, price_candidates, wear_order
+from app.domain.names import price_candidates
 from app.domain.odds import SPECIAL_ODDS, TIER_ODDS
+from app.domain.phases import merge_phases
 from app.domain.pricing import (
     choose_item_price,
     choose_listing_price,
@@ -11,6 +12,7 @@ from app.domain.pricing import (
 )
 from app.domain.records import DropRecord
 from app.domain.roi import DropInput, evaluate_unboxing
+from app.domain.wear import wear_order
 
 
 def test_tier_odds_sum_to_one() -> None:

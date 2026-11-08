@@ -1,21 +1,19 @@
 import asyncio
-from collections.abc import AsyncIterator
 from dataclasses import replace
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import cast
 
-import pytest
 from fastapi.testclient import TestClient
 
-from app.api.deps import get_session
+from app.api.deps import get_case_query_service
 from app.domain.odds import SPECIAL_ODDS
 from app.main import app
 from app.models.case import Case, CaseDrop
 from app.models.price import Price, PriceSnapshot, PriceWindow
 from app.repositories.catalog import CatalogRepository
 from app.repositories.prices import PriceRepository
-from app.services.case_query import CaseQueryService, CaseView, sort_views
+from app.services.case_query import CaseQueryService, CaseView, SortField, sort_views
 
 UPDATED_AT = datetime(2026, 10, 1, 12, 0, tzinfo=UTC)
 
@@ -179,14 +177,16 @@ def _service(windows: tuple[PriceWindow, ...] = ()) -> CaseQueryService:
             _Catalog([cheap, rich, unpriced], cheap_drops + rich_drops + unpriced_drops),
         ),
         cast(PriceRepository, _Prices(listings, snapshots, list(windows))),
+        currency="USD",
+        key_price=Decimal("2.49"),
     )
 
 
 def test_list_sorts_by_roi_and_keeps_unpriced_last() -> None:
     service = _service()
 
-    descending = asyncio.run(service.list_cases(sort="unboxing_roi", descending=True))
-    ascending = asyncio.run(service.list_cases(sort="unboxing_roi", descending=False))
+    descending = asyncio.run(service.list_cases(sort=SortField.unboxing_roi, descending=True))
+    ascending = asyncio.run(service.list_cases(sort=SortField.unboxing_roi, descending=False))
 
     assert [view.name for view in descending] == ["Rich", "Cheap", "Unpriced"]
     assert [view.name for view in ascending] == ["Cheap", "Rich", "Unpriced"]
@@ -197,7 +197,7 @@ def test_list_sorts_by_roi_and_keeps_unpriced_last() -> None:
 
 def test_name_sort_ignores_case() -> None:
     views = [replace(_view, name=name) for name in ("eSports", "Winter", "Chroma")]
-    assert [view.name for view in sort_views(views, "name", descending=False)] == [
+    assert [view.name for view in sort_views(views, SortField.name, descending=False)] == [
         "Chroma",
         "eSports",
         "Winter",
@@ -263,15 +263,8 @@ def test_history_returns_snapshots_for_the_window() -> None:
     assert asyncio.run(service.get_history(404, days=30)) is None
 
 
-async def _no_session() -> AsyncIterator[None]:
-    yield None
-
-
-def test_cases_endpoint_validates_sort_and_history_window(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr("app.api.v1.cases._service", lambda _session: _service())
-    app.dependency_overrides[get_session] = _no_session
+def test_cases_endpoint_validates_sort_and_history_window() -> None:
+    app.dependency_overrides[get_case_query_service] = lambda: _service()
     try:
         client = TestClient(app)
 

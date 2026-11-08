@@ -1,7 +1,7 @@
 from decimal import Decimal
 
-from app.api.v1.cases import to_detail, to_summary
-from app.schemas.case import ASSUMPTIONS
+from app.api.v1.mappers import to_detail, to_summary
+from app.domain.assumptions import assumptions_text
 from app.services.case_query import CaseView, DropView
 
 
@@ -41,7 +41,7 @@ def test_summary_hides_drops_and_keeps_assumptions() -> None:
     assert summary.case_price == 0.15
     assert summary.unboxing_roi == -0.73247352
     assert summary.roi_30d is None
-    assert summary.assumptions == ASSUMPTIONS
+    assert summary.assumptions == assumptions_text(Decimal("2.49"))
     assert "drops" not in summary.model_dump()
 
 

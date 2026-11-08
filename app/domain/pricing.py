@@ -9,10 +9,7 @@ def choose_listing_price(
     median: Decimal | None,
     minimum: Decimal | None,
 ) -> Decimal | None:
-    for value in (suggested, median, minimum):
-        if value is not None:
-            return value
-    return None
+    return _first_present(suggested, median, minimum)
 
 
 def choose_item_price(
@@ -20,10 +17,7 @@ def choose_item_price(
     median_90d: Decimal | None,
     listing: Decimal | None,
 ) -> Decimal | None:
-    for value in (median_30d, median_90d, listing):
-        if value is not None:
-            return value
-    return None
+    return _first_present(median_30d, median_90d, listing)
 
 
 def resolve_wear_price(
@@ -43,3 +37,10 @@ def investing_roi(current: Decimal | None, baseline: Decimal | None) -> Decimal 
     if current is None or baseline is None or baseline == 0:
         return None
     return (current - baseline) / baseline
+
+
+def _first_present(*values: Decimal | None) -> Decimal | None:
+    for value in values:
+        if value is not None:
+            return value
+    return None

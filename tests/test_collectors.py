@@ -53,7 +53,7 @@ def _run[T](
     return asyncio.run(main())
 
 
-def test_crate_phases_become_one_weighted_drop() -> None:
+def test_crate_keeps_every_doppler_phase_as_a_drop() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path.endswith("/crates.json")
         return httpx.Response(200, json=_crates_payload())
@@ -63,10 +63,12 @@ def test_crate_phases_become_one_weighted_drop() -> None:
     assert len(crates) == 1
     crate = crates[0]
     assert crate.def_index == 4061
-    assert [(drop.name, drop.is_special, drop.weight) for drop in crate.drops] == [
-        ("AK-47 | Cartel", False, 1),
-        ("★ Karambit | Doppler", True, 3),
-        ("★ Karambit | Rust Coat", True, 1),
+    assert [(drop.name, drop.is_special) for drop in crate.drops] == [
+        ("AK-47 | Cartel", False),
+        ("★ Karambit | Doppler", True),
+        ("★ Karambit | Doppler", True),
+        ("★ Karambit | Doppler", True),
+        ("★ Karambit | Rust Coat", True),
     ]
 
 

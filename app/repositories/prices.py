@@ -1,4 +1,3 @@
-from collections.abc import Iterable, Sequence
 from datetime import UTC, date, datetime
 from typing import Any, cast
 
@@ -6,14 +5,10 @@ from sqlalchemy import CursorResult, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.batching import chunks
 from app.domain.constants import SOURCE_SKINPORT
 from app.domain.records import Listing, SaleWindow
 from app.models.price import Price, PriceSnapshot, PriceWindow
-
-
-def _chunks[T](rows: Sequence[T], size: int) -> Iterable[Sequence[T]]:
-    for index in range(0, len(rows), size):
-        yield rows[index : index + size]
 
 
 class PriceRepository:
@@ -21,6 +16,7 @@ class PriceRepository:
         self._session = session
 
     async def upsert_listings(self, listings: list[Listing], source: str = SOURCE_SKINPORT) -> int:
+        updated_at = datetime.now(UTC)
         folded: dict[tuple[str, str], Listing] = {}
         for item in listings:
             folded[(item.market_hash_name, item.currency)] = item
@@ -35,11 +31,11 @@ class PriceRepository:
                 "mean_price": item.mean_price,
                 "median_price": item.median_price,
                 "quantity": item.quantity,
-                "updated_at": datetime.now(UTC),
+                "updated_at": updated_at,
             }
             for item in folded.values()
         ]
-        for batch in _chunks(rows, 500):
+        for batch in chunks(rows, 500):
             stmt = pg_insert(Price).values(list(batch))
             excluded = stmt.excluded
             stmt = stmt.on_conflict_do_update(
@@ -77,7 +73,7 @@ class PriceRepository:
             }
             for item in folded.values()
         ]
-        for batch in _chunks(rows, 500):
+        for batch in chunks(rows, 500):
             stmt = pg_insert(PriceWindow).values(list(batch))
             excluded = stmt.excluded
             stmt = stmt.on_conflict_do_update(
@@ -116,7 +112,8 @@ class PriceRepository:
             ),
             {"source": source, "currency": currency},
         )
-        return cast(CursorResult[Any], result).rowcount or 0
+        inserted = cast(CursorResult[Any], result).rowcount
+        return inserted or 0
 
     async def listings_for(
         self,
@@ -127,7 +124,7 @@ class PriceRepository:
         if not names:
             return {}
         found: dict[str, Price] = {}
-        for batch in _chunks(names, 1000):
+        for batch in chunks(names, 1000):
             stmt = select(Price).where(
                 Price.source == source,
                 Price.currency == currency,
@@ -146,7 +143,7 @@ class PriceRepository:
         if not names:
             return {}
         found: dict[tuple[str, str], PriceWindow] = {}
-        for batch in _chunks(names, 1000):
+        for batch in chunks(names, 1000):
             stmt = select(PriceWindow).where(
                 PriceWindow.source == source,
                 PriceWindow.currency == currency,

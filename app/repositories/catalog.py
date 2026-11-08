@@ -1,10 +1,11 @@
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Hashable
 from typing import Any
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.batching import chunks
 from app.domain.constants import KIND_CRATE, KIND_SKIN
 from app.domain.names import market_hash_name
 from app.domain.records import CrateRecord, SkinRecord
@@ -12,20 +13,14 @@ from app.models.case import Case, CaseDrop
 from app.models.item import Item
 
 
-def _chunks[T](rows: Sequence[T], size: int) -> Iterable[Sequence[T]]:
-    for index in range(0, len(rows), size):
-        yield rows[index : index + size]
-
-
 class CatalogRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def upsert_items(self, rows: list[dict[str, Any]]) -> int:
-        if not rows:
-            return 0
-        saved = 0
-        for batch in _chunks(rows, 400):
+    async def upsert_items(self, skins: list[SkinRecord], crates: list[CrateRecord]) -> int:
+        rows = _skin_item_rows(skins) + _crate_item_rows(crates)
+        unique_rows = _unique_item_rows(rows)
+        for batch in chunks(unique_rows, 400):
             stmt = pg_insert(Item).values(list(batch))
             excluded = stmt.excluded
             stmt = stmt.on_conflict_do_update(
@@ -49,13 +44,11 @@ class CatalogRepository:
                 },
             )
             await self._session.execute(stmt)
-            saved += len(batch)
-        return saved
+        return len(unique_rows)
 
-    async def upsert_cases(self, rows: list[dict[str, Any]]) -> int:
-        if not rows:
-            return 0
-        for batch in _chunks(rows, 200):
+    async def upsert_cases(self, crates: list[CrateRecord]) -> int:
+        rows = _case_rows(crates)
+        for batch in chunks(rows, 200):
             stmt = pg_insert(Case).values(list(batch))
             excluded = stmt.excluded
             stmt = stmt.on_conflict_do_update(
@@ -72,15 +65,11 @@ class CatalogRepository:
             await self._session.execute(stmt)
         return len(rows)
 
-    async def ids_by_bymykel(self) -> dict[str, int]:
-        result = await self._session.execute(select(Case.bymykel_id, Case.id))
-        return {bymykel_id: case_id for bymykel_id, case_id in result.all()}
-
-    async def replace_drops(self, rows: list[dict[str, Any]]) -> int:
+    async def replace_drops(self, crates: list[CrateRecord]) -> int:
+        case_ids = await self._case_ids_by_bymykel()
+        rows = _drop_rows(crates, case_ids)
         await self._session.execute(delete(CaseDrop))
-        if not rows:
-            return 0
-        for batch in _chunks(rows, 500):
+        for batch in chunks(rows, 500):
             await self._session.execute(pg_insert(CaseDrop), list(batch))
         return len(rows)
 
@@ -104,7 +93,7 @@ class CatalogRepository:
         names: list[str],
     ) -> dict[str, tuple[float | None, float | None]]:
         found: dict[str, tuple[float | None, float | None]] = {}
-        for batch in _chunks(names, 1000):
+        for batch in chunks(names, 1000):
             stmt = (
                 select(Item.base_name, func.min(Item.min_float), func.max(Item.max_float))
                 .where(Item.kind == KIND_SKIN, Item.base_name.in_(list(batch)))
@@ -114,8 +103,12 @@ class CatalogRepository:
                 found[name] = (low, high)
         return found
 
+    async def _case_ids_by_bymykel(self) -> dict[str, int]:
+        result = await self._session.execute(select(Case.bymykel_id, Case.id))
+        return {bymykel_id: case_id for bymykel_id, case_id in result.all()}
 
-def skin_item_rows(skins: list[SkinRecord]) -> list[dict[str, Any]]:
+
+def _skin_item_rows(skins: list[SkinRecord]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for skin in skins:
         wears = skin.wears or ("",)
@@ -143,7 +136,7 @@ def skin_item_rows(skins: list[SkinRecord]) -> list[dict[str, Any]]:
     return rows
 
 
-def crate_item_rows(crates: list[CrateRecord]) -> list[dict[str, Any]]:
+def _crate_item_rows(crates: list[CrateRecord]) -> list[dict[str, Any]]:
     return [
         {
             "market_hash_name": crate.market_hash_name,
@@ -167,7 +160,20 @@ def crate_item_rows(crates: list[CrateRecord]) -> list[dict[str, Any]]:
     ]
 
 
-def case_rows(crates: list[CrateRecord]) -> list[dict[str, Any]]:
+def _unique_item_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_hash = _last_by(rows, lambda row: row["market_hash_name"])
+    return _last_by(by_hash, lambda row: (row["bymykel_id"], row["wear"], row["kind"]))
+
+
+def _last_by(
+    rows: list[dict[str, Any]],
+    key: Callable[[dict[str, Any]], Hashable],
+) -> list[dict[str, Any]]:
+    chosen = {key(row): row for row in rows}
+    return list(chosen.values())
+
+
+def _case_rows(crates: list[CrateRecord]) -> list[dict[str, Any]]:
     return [
         {
             "bymykel_id": crate.bymykel_id,
@@ -182,7 +188,7 @@ def case_rows(crates: list[CrateRecord]) -> list[dict[str, Any]]:
     ]
 
 
-def drop_rows(crates: list[CrateRecord], case_ids: dict[str, int]) -> list[dict[str, Any]]:
+def _drop_rows(crates: list[CrateRecord], case_ids: dict[str, int]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for crate in crates:
         case_id = case_ids.get(crate.bymykel_id)

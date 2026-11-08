@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.api.router import router
-from app.cache.prices import close_redis
+from app.cache.redis_client import close_redis
 from app.core.logging import setup_logging
 from app.db.session import engine
 

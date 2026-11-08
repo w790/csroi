@@ -6,7 +6,8 @@ from datetime import UTC, datetime
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from app.core.config import settings
-from app.jobs.tasks import run_catalog, run_price_sync
+from app.core.logging import setup_logging
+from app.jobs.tasks import run_catalog_sync, run_price_sync
 
 logger = logging.getLogger(__name__)
 MISFIRE_GRACE_SECONDS = 300
@@ -18,7 +19,7 @@ def create_scheduler() -> AsyncIOScheduler:
         job_defaults={"misfire_grace_time": MISFIRE_GRACE_SECONDS},
     )
     scheduler.add_job(
-        _safe(run_price_sync),
+        _log_failures(run_price_sync),
         "interval",
         minutes=settings.price_refresh_minutes,
         next_run_time=datetime.now(UTC),
@@ -28,7 +29,7 @@ def create_scheduler() -> AsyncIOScheduler:
         coalesce=True,
     )
     scheduler.add_job(
-        _safe(run_catalog),
+        _log_failures(run_catalog_sync),
         "cron",
         hour=3,
         minute=10,
@@ -38,7 +39,7 @@ def create_scheduler() -> AsyncIOScheduler:
         coalesce=True,
     )
     scheduler.add_job(
-        _safe(run_catalog),
+        _log_failures(run_catalog_sync),
         "date",
         run_date=datetime.now(UTC),
         id="sync_catalog_on_start",
@@ -47,7 +48,7 @@ def create_scheduler() -> AsyncIOScheduler:
     return scheduler
 
 
-def _safe(func: Callable[[], Awaitable[object]]) -> Callable[[], Awaitable[None]]:
+def _log_failures(func: Callable[[], Awaitable[object]]) -> Callable[[], Awaitable[None]]:
     async def wrapper() -> None:
         try:
             await func()
@@ -58,8 +59,6 @@ def _safe(func: Callable[[], Awaitable[object]]) -> Callable[[], Awaitable[None]
 
 
 async def _main() -> None:
-    from app.core.logging import setup_logging
-
     setup_logging()
     scheduler = create_scheduler()
     scheduler.start()

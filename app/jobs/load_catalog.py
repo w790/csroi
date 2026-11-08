@@ -1,6 +1,8 @@
 import asyncio
 
-from app.jobs.tasks import run_catalog
+from app.core.logging import setup_logging
+from app.jobs.tasks import run_catalog_sync
 
 if __name__ == "__main__":
-    asyncio.run(run_catalog())
+    setup_logging()
+    asyncio.run(run_catalog_sync())
